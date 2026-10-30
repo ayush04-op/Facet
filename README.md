@@ -17,6 +17,7 @@ Mozilla's source tree is copied or forked. GeckoView is licensed under the MPL 2
 - Bookmarks, downloads, share, desktop site, restore tabs
 - Paper and Paper Dark themes, Prism Serif headings and Prism Sans text throughout
 - Animated interface
+- Grouped settings and a built-in **Software update** page that shows this build and your device status
 
 Coming next: built-in extension support (WebExtensions) and an encrypted password vault.
 
@@ -33,14 +34,19 @@ Local build: JDK 17, Android SDK 35 and Gradle 8.9, then
 
 ### Signing
 
-Without secrets, CI signs with a throwaway debug key, so builds can't be installed over each
-other. For stable signing add these repository secrets: `FACET_KEYSTORE_B64`,
+Debug builds are signed with the shared key in `app/debug.keystore`, so each build can update the
+previous one. For stable signing add these repository secrets: `FACET_KEYSTORE_B64`,
 `FACET_KEYSTORE_PASSWORD`, `FACET_KEY_ALIAS`, `FACET_KEY_PASSWORD`.
 
 ## Fonts
 
 The Prism Sans and Prism Serif fonts are bundled in `app/src/main/assets/fonts` and used across
 the whole app. The font files are not covered by the MIT license.
+
+## Credits
+
+Facet is made by Ayush and was written together with [Claude](https://claude.ai), an AI model from Anthropic.
+The browser engine is Mozilla's GeckoView.
 
 ## License
 

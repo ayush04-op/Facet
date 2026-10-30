@@ -16,7 +16,7 @@ import android.widget.LinearLayout
 
 enum class Icon {
     BACK, FORWARD, PLUS, CLOSE, MENU, TABS, LOCK, SEARCH, SHIELD, STAR,
-    SETTINGS, SHARE, REFRESH, GLOBE, TRASH, CHECK, DESKTOP, PRIVATE, LINK
+    SETTINGS, SHARE, REFRESH, GLOBE, TRASH, CHECK, DESKTOP, PRIVATE, LINK, DOWNLOAD, INFO, PHONE
 }
 
 /** All icons are drawn in code on a 24x24 grid, so there are no image resources to go wrong. */
@@ -167,6 +167,20 @@ class IconView(context: Context, icon: Icon, tint: Int, private val sizeDp: Int 
                 canvas.drawRoundRect(RectF(3.5f, 9f, 11.5f, 15f), 3f, 3f, stroke)
                 canvas.drawRoundRect(RectF(12.5f, 9f, 20.5f, 15f), 3f, 3f, stroke)
                 line(canvas, 9f, 12f, 15f, 12f)
+            }
+            Icon.DOWNLOAD -> {
+                line(canvas, 12f, 4f, 12f, 15f)
+                canvas.drawPath(poly(7.5f, 10.5f, 12f, 15f, 16.5f, 10.5f), stroke)
+                canvas.drawPath(poly(5f, 15f, 5f, 19.5f, 19f, 19.5f, 19f, 15f), stroke)
+            }
+            Icon.INFO -> {
+                canvas.drawCircle(12f, 12f, 8.5f, stroke)
+                line(canvas, 12f, 11f, 12f, 16.5f)
+                canvas.drawCircle(12f, 7.8f, 1f, fill)
+            }
+            Icon.PHONE -> {
+                canvas.drawRoundRect(RectF(7f, 3f, 17f, 21f), 2.6f, 2.6f, stroke)
+                line(canvas, 10.5f, 17.5f, 13.5f, 17.5f)
             }
         }
         canvas.restore()

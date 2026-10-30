@@ -1,9 +1,6 @@
 package app.facet.browser
 
 import android.content.Context
-import android.text.TextUtils
-import android.view.Gravity
-import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -19,155 +16,96 @@ class SettingsView(
     private val onToggled: () -> Unit,
     private val onPickEngine: () -> Unit,
     private val onPickTheme: () -> Unit,
-    private val onClearData: () -> Unit
+    private val onClearData: () -> Unit,
+    private val onOpenUpdates: () -> Unit
 ) : LinearLayout(ctx) {
 
+    private val kit = RowKit(ctx, c)
     private val body = LinearLayout(ctx)
 
     init {
-        orientation = LinearLayout.VERTICAL
+        orientation = VERTICAL
         setBackgroundColor(c.bg)
         isClickable = true
-
-        val header = LinearLayout(ctx)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-        header.setPadding(ctx.dp(8), ctx.dp(12), ctx.dp(20), ctx.dp(4))
-        val back = FrameLayout(ctx)
-        back.pressable(null, withAlpha(c.ink, 0x22), ctx.dpf(24f))
-        back.addView(IconView(ctx, Icon.BACK, c.ink, 24), FrameLayout.LayoutParams(ctx.dp(24), ctx.dp(24), Gravity.CENTER))
-        back.setOnClickListener { onBack() }
-        header.addView(back, LinearLayout.LayoutParams(ctx.dp(48), ctx.dp(48)))
-        val title = makeText(ctx, "Settings", 32f, c.ink, Fonts.serif)
-        val tlp = LinearLayout.LayoutParams(WRAP, WRAP)
-        tlp.leftMargin = ctx.dp(6)
-        header.addView(title, tlp)
-        addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
-
+        addView(kit.header("Settings", onBack), LayoutParams(MATCH, WRAP))
         val scroll = ScrollView(ctx)
         scroll.isVerticalScrollBarEnabled = false
-        body.orientation = LinearLayout.VERTICAL
-        body.setPadding(ctx.dp(20), ctx.dp(8), ctx.dp(20), ctx.dp(32))
+        body.orientation = VERTICAL
+        body.setPadding(ctx.dp(20), ctx.dp(4), ctx.dp(20), ctx.dp(32))
         scroll.addView(body, FrameLayout.LayoutParams(MATCH, WRAP))
-        addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
-
+        addView(scroll, LayoutParams(MATCH, 0, 1f))
         rebuild()
+    }
+
+    private fun put(g: LinearLayout) {
+        body.addView(g, LinearLayout.LayoutParams(MATCH, WRAP))
     }
 
     fun rebuild() {
         body.removeAllViews()
         val nf = NumberFormat.getIntegerInstance()
 
-        section("Privacy")
-        toggle("Block ads and trackers", "Strict tracking protection: ads, analytics, social trackers, fingerprinters and cryptominers.", prefs.blockTrackers) {
+        body.addView(kit.section("Software"))
+        val sw = kit.group()
+        val avail = prefs.availableUpdate
+        kit.add(sw, kit.value(Icon.DOWNLOAD, "Software update",
+            if (avail.isNotEmpty()) "$avail available" else "Version $version",
+            "Updates, this build and device status") { onOpenUpdates() })
+        put(sw)
+
+        body.addView(kit.section("Privacy and security"))
+        val priv = kit.group()
+        kit.add(priv, kit.toggle(Icon.SHIELD, "Block ads and trackers", "Ads, analytics, social trackers, fingerprinters and cryptominers.", prefs.blockTrackers) {
             prefs.blockTrackers = it; onToggled()
-        }
-        toggle("Isolate third-party cookies", "Cookies from other sites stay locked to the site that set them.", prefs.blockThirdPartyCookies) {
+        })
+        kit.add(priv, kit.toggle(Icon.PRIVATE, "Isolate third-party cookies", "Cookies from other sites stay locked to the site that set them.", prefs.blockThirdPartyCookies) {
             prefs.blockThirdPartyCookies = it; onToggled()
-        }
-        toggle("HTTPS-only mode", "Only opens secure pages, and warns before using an insecure one.", prefs.httpsUpgrade) {
+        })
+        kit.add(priv, kit.toggle(Icon.LOCK, "HTTPS-only mode", "Only opens secure pages, and warns before using an insecure one.", prefs.httpsUpgrade) {
             prefs.httpsUpgrade = it; onToggled()
-        }
-        toggle("Safe Browsing", "Warns about dangerous sites. Checks hash prefixes with Google.", prefs.safeBrowsing) {
+        })
+        kit.add(priv, kit.toggle(Icon.INFO, "Safe Browsing", "Warns about dangerous sites. Checks hash prefixes with Google.", prefs.safeBrowsing) {
             prefs.safeBrowsing = it; onToggled()
-        }
-        toggle("JavaScript", "Turning this off blocks most trackers but breaks many sites.", prefs.javascript) {
+        })
+        kit.add(priv, kit.toggle(Icon.LINK, "JavaScript", "Turning this off blocks most trackers but breaks many sites.", prefs.javascript) {
             prefs.javascript = it; onToggled()
-        }
+        })
+        put(priv)
 
-        section("Browsing")
-        value("Search engine", Urls.engine(prefs.searchEngine).name) { onPickEngine() }
-        toggle("Restore tabs on launch", "Reopen the tabs you had open. Private tabs are never saved.", prefs.restoreTabs) {
+        body.addView(kit.section("Browsing"))
+        val br = kit.group()
+        kit.add(br, kit.value(Icon.SEARCH, "Search engine", Urls.engine(prefs.searchEngine).name) { onPickEngine() })
+        kit.add(br, kit.toggle(Icon.TABS, "Restore tabs on launch", "Private tabs are never saved.", prefs.restoreTabs) {
             prefs.restoreTabs = it; onToggled()
-        }
+        })
+        put(br)
 
-        section("Appearance")
+        body.addView(kit.section("Appearance"))
+        val ap = kit.group()
         val themeName = when (prefs.theme) { 1 -> "Paper (light)"; 2 -> "Paper Dark"; else -> "Match system" }
-        value("Theme", themeName) { onPickTheme() }
+        kit.add(ap, kit.value(Icon.PHONE, "Theme", themeName) { onPickTheme() })
+        put(ap)
 
-        section("Data")
-        value("Clear browsing data", "Cookies, cache, site data") { onClearData() }
+        body.addView(kit.section("Data"))
+        val data = kit.group()
+        kit.add(data, kit.value(Icon.TRASH, "Clear browsing data", "Cookies, cache, site data") { onClearData() })
+        put(data)
 
-        section("Stats")
-        val blocked = prefs.trackersBlocked + pendingBlocked()
-        stat("Trackers blocked", nf.format(blocked))
-        stat("Secure page loads", nf.format(prefs.httpsUpgraded))
+        body.addView(kit.section("Activity"))
+        val st = kit.group()
+        kit.add(st, kit.info("Trackers blocked", nf.format(prefs.trackersBlocked + pendingBlocked())))
+        kit.add(st, kit.info("Secure page loads", nf.format(prefs.httpsUpgraded)))
+        put(st)
 
-        section("About")
-        stat("Version", version)
-        val note = makeText(
-            ctx,
-            "Facet collects nothing: no accounts, no analytics, no telemetry. Powered by Mozilla's GeckoView engine, bundled inside the app.",
-            13f, c.muted, Fonts.sans
-        )
-        note.setLineSpacing(0f, 1.2f)
-        val nlp = LinearLayout.LayoutParams(MATCH, WRAP)
-        nlp.topMargin = ctx.dp(10)
-        body.addView(note, nlp)
-    }
-
-    private fun section(name: String) {
-        val t = makeTag(ctx, name, c.accent)
-        val lp = LinearLayout.LayoutParams(WRAP, WRAP)
-        lp.topMargin = ctx.dp(26)
-        lp.bottomMargin = ctx.dp(6)
-        body.addView(t, lp)
-    }
-
-    private fun rowBase(): LinearLayout {
-        val row = LinearLayout(ctx)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(ctx.dp(2), ctx.dp(12), ctx.dp(2), ctx.dp(12))
-        return row
-    }
-
-    private fun divider() {
-        val d = View(ctx)
-        d.setBackgroundColor(c.line)
-        body.addView(d, LinearLayout.LayoutParams(MATCH, ctx.dp(1)))
-    }
-
-    private fun toggle(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        val row = rowBase()
-        val texts = LinearLayout(ctx)
-        texts.orientation = LinearLayout.VERTICAL
-        texts.addView(makeText(ctx, title, 16f, c.ink, Fonts.sansMedium))
-        val sub = makeText(ctx, subtitle, 13f, c.muted, Fonts.sans)
-        sub.setLineSpacing(0f, 1.15f)
-        val slp = LinearLayout.LayoutParams(WRAP, WRAP)
-        slp.topMargin = ctx.dp(4)
-        texts.addView(sub, slp)
-        val tlp = LinearLayout.LayoutParams(0, WRAP, 1f)
-        tlp.rightMargin = ctx.dp(16)
-        row.addView(texts, tlp)
-        val sw = SwitchView(ctx, c, checked)
-        sw.onChange = onChange
-        row.addView(sw, LinearLayout.LayoutParams(ctx.dp(46), ctx.dp(28)))
-        row.setOnClickListener { sw.performClick() }
-        body.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
-        divider()
-    }
-
-    private fun value(title: String, current: String, onClick: () -> Unit) {
-        val row = rowBase()
-        row.pressable(null, withAlpha(c.ink, 0x14), ctx.dpf(10f))
-        row.setPadding(ctx.dp(2), ctx.dp(14), ctx.dp(2), ctx.dp(14))
-        row.setOnClickListener { onClick() }
-        row.addView(makeText(ctx, title, 16f, c.ink, Fonts.sansMedium), LinearLayout.LayoutParams(0, WRAP, 1f))
-        val v = makeText(ctx, current, 14f, c.muted, Fonts.sans)
-        v.maxLines = 1
-        v.ellipsize = TextUtils.TruncateAt.END
-        row.addView(v, LinearLayout.LayoutParams(WRAP, WRAP))
-        body.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
-        divider()
-    }
-
-    private fun stat(title: String, value: String) {
-        val row = rowBase()
-        row.addView(makeText(ctx, title, 16f, c.ink, Fonts.sans), LinearLayout.LayoutParams(0, WRAP, 1f))
-        row.addView(makeText(ctx, value, 18f, c.ink, Fonts.serifText), LinearLayout.LayoutParams(WRAP, WRAP))
-        body.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
-        divider()
+        body.addView(kit.section("About"))
+        val ab = kit.group()
+        kit.add(ab, kit.info("Version", version))
+        kit.add(ab, kit.info("Engine", DeviceInfo.engineVersion(ctx)))
+        kit.add(ab, kit.info("License", "MIT"))
+        put(ab)
+        body.addView(kit.note(
+            "Facet collects nothing: no accounts, no analytics, no telemetry. Powered by Mozilla's GeckoView engine, bundled inside the app."
+        ))
+        body.addView(kit.note("Made by Ayush, written with Claude, an AI model from Anthropic."))
     }
 }

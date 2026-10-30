@@ -83,6 +83,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             "1.0"
         }
+        autoCheckUpdates()
         runtime = FacetApp.runtime(this)
         geckoView = GeckoView(this)
 
@@ -951,11 +952,52 @@ class MainActivity : Activity() {
                 })
                 items.add(SheetItem(null, "Cancel") { })
                 showSheet("Clear browsing data?", items)
-            }
+            },
+            { showUpdates() }
         )
         holder[0] = sv
         settingsView = sv
         showOverlay(sv)
+    }
+
+    private fun showUpdates() {
+        val uv = UpdatesView(
+            this, c, prefs, version,
+            { closeTopOverlay(); settingsView?.rebuild() },
+            { title, hint, initial, secret, save -> showInput(title, hint, initial, secret, save) }
+        )
+        showOverlay(uv)
+    }
+
+    private fun showInput(title: String, hint: String, initial: String, secret: Boolean, save: (String) -> Unit) {
+        val holder = arrayOfNulls<InputSheetView>(1)
+        val v = InputSheetView(this, c, title, hint, initial, secret, save) {
+            val me = holder[0]
+            if (me != null && overlays.contains(me)) {
+                overlays.remove(me)
+                rootFrame.removeView(me)
+            }
+        }
+        holder[0] = v
+        overlays.add(v)
+        rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    /** Quiet background check at most twice a day; only records that a newer release exists. */
+    private fun autoCheckUpdates() {
+        if (!prefs.autoCheckUpdates) return
+        if (System.currentTimeMillis() - prefs.lastUpdateCheck < 12L * 3600 * 1000) return
+        val repo = prefs.updateRepo
+        val token = prefs.updateToken
+        Thread {
+            try {
+                val r = Updater.latest(repo, token)
+                prefs.lastUpdateCheck = System.currentTimeMillis()
+                prefs.availableUpdate = if (r != null && Updater.isNewer(r.tag, version)) r.tag else ""
+            } catch (e: Exception) {
+                // stay quiet: the updates page shows errors when the user asks
+            }
+        }.start()
     }
 
     private fun applyThemeMode(mode: Int) {
