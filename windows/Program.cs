@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Threading;
 using System.Windows;
 using CefSharp;
+using CefSharp.Wpf;
 
 namespace Facet
 {
