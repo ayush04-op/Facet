@@ -5,6 +5,11 @@ on:
     branches: ['**']
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a release with this tag (for example v1.0). Leave empty for a plain test build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -29,6 +34,9 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event.inputs.release_tag }}" == v* ]]; then
+            t="${{ github.event.inputs.release_tag }}"
+            echo "name=${t#v}" >> "$GITHUB_OUTPUT"
           else
             echo "name=1.0" >> "$GITHUB_OUTPUT"
           fi
@@ -104,6 +112,9 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event.inputs.release_tag }}" == v* ]]; then
+            t="${{ github.event.inputs.release_tag }}"
+            echo "name=${t#v}" >> "$GITHUB_OUTPUT"
           else
             echo "name=1.0" >> "$GITHUB_OUTPUT"
           fi
@@ -130,7 +141,7 @@ jobs:
           path: Facet-v*-windows-x64.zip
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.inputs.release_tag, 'v')
     needs: [build, windows]
     runs-on: ubuntu-latest
     steps:
@@ -142,5 +153,7 @@ jobs:
       - name: Publish GitHub release (Android and Windows together)
         uses: softprops/action-gh-release@v2
         with:
-          name: Facet ${{ github.ref_name }}
+          name: Facet ${{ github.event.inputs.release_tag || github.ref_name }}
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: dist/*
