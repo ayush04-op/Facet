@@ -86,7 +86,7 @@ class NewTabView(
             row.orientation = LinearLayout.HORIZONTAL
             val gap = ctx.dp(12)
             val a = statCard(ctx, "Trackers blocked", blocked, "since install")
-            val b = statCard(ctx, "Upgraded to HTTPS", upgraded, "page loads")
+            val b = statCard(ctx, "Secure page loads", upgraded, "over HTTPS")
             val la = LinearLayout.LayoutParams(0, WRAP, 1f)
             la.rightMargin = gap / 2
             val lb = LinearLayout.LayoutParams(0, WRAP, 1f)

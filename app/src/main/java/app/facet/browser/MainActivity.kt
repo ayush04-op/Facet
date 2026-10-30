@@ -1,6 +1,5 @@
 package app.facet.browser
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
@@ -9,14 +8,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.Message
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
@@ -26,32 +22,27 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.webkit.CookieManager
-import android.webkit.DownloadListener
-import android.webkit.GeolocationPermissions
-import android.webkit.PermissionRequest
 import android.webkit.URLUtil
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebStorage
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import org.json.JSONArray
-import java.io.ByteArrayInputStream
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.ContentBlocking
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.StorageController
+import org.mozilla.geckoview.WebResponse
 import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
-    private lateinit var blocklist: Blocklist
+    private lateinit var runtime: GeckoRuntime
     private lateinit var c: Colors
     private lateinit var version: String
 
@@ -59,8 +50,10 @@ class MainActivity : Activity() {
     private var current: BrowserTab? = null
     private var nextId = 1L
 
+    private lateinit var geckoView: GeckoView
     private lateinit var rootFrame: FrameLayout
     private lateinit var contentHost: FrameLayout
+    private lateinit var bottomBar: LinearLayout
     private lateinit var progressLine: ProgressLine
     private lateinit var lockIcon: IconView
     private lateinit var addressEdit: EditText
@@ -73,14 +66,11 @@ class MainActivity : Activity() {
     private var tabSwitcher: TabSwitcherView? = null
     private var settingsView: SettingsView? = null
 
-    private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var customView: View? = null
-    private var customCallback: WebChromeClient.CustomViewCallback? = null
+    private var fullscreen = false
+    private var pendingFile: Pair<GeckoSession.PromptDelegate.FilePrompt, GeckoResult<GeckoSession.PromptDelegate.PromptResponse>>? = null
 
     private val pendingBlocked = AtomicInteger(0)
-    private val pendingUpgraded = AtomicInteger(0)
-
-    private val emptyBytes = ByteArray(0)
+    private val pendingSecure = AtomicInteger(0)
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -88,13 +78,13 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         Fonts.init(this)
         prefs = Prefs(this)
-        blocklist = Blocklist.load(this)
         version = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0"
         } catch (e: Exception) {
             "1.0"
         }
-        CookieManager.getInstance().setAcceptCookie(true)
+        runtime = FacetApp.runtime(this)
+        geckoView = GeckoView(this)
 
         buildUi()
         if (prefs.restoreTabs) restoreSession()
@@ -110,15 +100,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        current?.webView?.onResume()
+        current?.session?.setActive(true)
     }
 
     override fun onPause() {
         super.onPause()
-        for (t in tabs) t.webView?.onPause()
+        current?.session?.setActive(false)
         flushStats()
         saveSession()
-        CookieManager.getInstance().flush()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -128,20 +117,18 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        geckoView.releaseSession()
         for (t in tabs) {
-            t.webView?.let {
-                (it.parent as? ViewGroup)?.removeView(it)
-                it.destroy()
-            }
-            t.webView = null
+            t.session?.close()
+            t.session = null
         }
         super.onDestroy()
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (customView != null) {
-            hideCustomView()
+        if (fullscreen) {
+            current?.session?.exitFullScreen()
             return
         }
         if (overlays.isNotEmpty()) {
@@ -157,9 +144,8 @@ class MainActivity : Activity() {
             moveTaskToBack(true)
             return
         }
-        val wv = t.webView
-        if (!t.showsNewTab && wv != null && wv.canGoBack()) {
-            wv.goBack()
+        if (!t.showsNewTab && t.canGoBack) {
+            t.session?.goBack()
             return
         }
         if (!t.showsNewTab && t.closeOnBack && tabs.size > 1) {
@@ -168,15 +154,13 @@ class MainActivity : Activity() {
         }
         if (!t.showsNewTab) {
             // No history left: go back to the new tab page.
+            disposeSession(t)
             t.showsNewTab = true
             t.url = ""
             t.title = ""
             t.progress = 0
-            wv?.let {
-                (it.parent as? ViewGroup)?.removeView(it)
-                it.destroy()
-            }
-            t.webView = null
+            t.canGoBack = false
+            t.canGoForward = false
             showCurrent()
             return
         }
@@ -191,13 +175,29 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_FILE) {
-            val cb = fileCallback
-            fileCallback = null
-            var result: Array<Uri>? = null
-            if (resultCode == RESULT_OK) {
-                result = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            val pf = pendingFile
+            pendingFile = null
+            if (pf != null) {
+                val prompt = pf.first
+                val res = pf.second
+                val uris = ArrayList<Uri>()
+                if (resultCode == RESULT_OK && data != null) {
+                    val clip = data.clipData
+                    if (clip != null) {
+                        for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+                    } else {
+                        val one = data.data
+                        if (one != null) uris.add(one)
+                    }
+                }
+                if (uris.isEmpty()) {
+                    res.complete(prompt.dismiss())
+                } else if (uris.size == 1) {
+                    res.complete(prompt.confirm(this, uris[0]))
+                } else {
+                    res.complete(prompt.confirm(this, uris.toTypedArray()))
+                }
             }
-            cb?.onReceiveValue(result)
         }
     }
 
@@ -225,6 +225,14 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = flags
     }
 
+    @Suppress("DEPRECATION")
+    private fun hideSystemBars() {
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    }
+
     private fun buildUi() {
         c = resolveColors()
         applySystemBars()
@@ -242,7 +250,8 @@ class MainActivity : Activity() {
         progressLine = ProgressLine(this, c)
         column.addView(progressLine, LinearLayout.LayoutParams(MATCH, dp(2)))
 
-        column.addView(buildBottomBar(), LinearLayout.LayoutParams(MATCH, WRAP))
+        bottomBar = buildBottomBar()
+        column.addView(bottomBar, LinearLayout.LayoutParams(MATCH, WRAP))
         rootFrame.addView(column, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(rootFrame)
         contentHost.requestFocus()
@@ -361,9 +370,8 @@ class MainActivity : Activity() {
                 }.start()
             }
         }
-        val wv = t.webView
         backIcon.alpha = if (!t.showsNewTab || tabs.size > 1) 1f else 0.35f
-        forwardIcon.alpha = if (!t.showsNewTab && wv?.canGoForward() == true) 1f else 0.35f
+        forwardIcon.alpha = if (!t.showsNewTab && t.canGoForward) 1f else 0.35f
         val loading = t.progress in 1..99
         reloadIcon.icon = if (loading) Icon.CLOSE else Icon.REFRESH
         reloadIcon.alpha = if (t.showsNewTab) 0.35f else 1f
@@ -379,7 +387,7 @@ class MainActivity : Activity() {
         } else {
             val u = urlOf(t)
             addressEdit.setText(Urls.host(u))
-            val secure = u.startsWith("https://")
+            val secure = t.secure || u.startsWith("https://")
             lockIcon.icon = if (secure) Icon.LOCK else Icon.GLOBE
             lockIcon.tint = if (secure) c.muted else c.accent
         }
@@ -397,21 +405,16 @@ class MainActivity : Activity() {
         updateAddress()
     }
 
-    private fun focusAddress() {
-        addressEdit.requestFocus()
-    }
-
     // ---------------------------------------------------------------- tabs
 
-    private fun urlOf(t: BrowserTab): String = t.webView?.url ?: t.pendingUrl ?: t.url
+    private fun urlOf(t: BrowserTab): String = t.url
 
     private fun newTab(url: String?, isPrivate: Boolean, select: Boolean = true): BrowserTab {
         val t = BrowserTab(nextId++, isPrivate)
         if (url != null) {
-            val target = maybeUpgrade(t, url)
             t.showsNewTab = false
-            t.pendingUrl = target
-            t.url = target
+            t.pendingUrl = url
+            t.url = url
         }
         tabs.add(t)
         if (select) selectTab(t)
@@ -419,37 +422,75 @@ class MainActivity : Activity() {
     }
 
     private fun selectTab(t: BrowserTab) {
-        current?.webView?.onPause()
+        current?.session?.setActive(false)
         current = t
         showCurrent()
+    }
+
+    private fun sessionSettings(t: BrowserTab): GeckoSessionSettings {
+        return GeckoSessionSettings.Builder()
+            .usePrivateMode(t.isPrivate)
+            .userAgentMode(
+                if (t.desktop) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
+            )
+            .viewportMode(
+                if (t.desktop) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
+            )
+            .build()
+    }
+
+    private fun attachDelegates(t: BrowserTab, s: GeckoSession) {
+        val d = TabDelegate(t)
+        s.navigationDelegate = d
+        s.progressDelegate = d
+        s.contentDelegate = d
+        s.promptDelegate = d
+        s.contentBlockingDelegate = d
+    }
+
+    private fun ensureSession(t: BrowserTab): GeckoSession {
+        var s = t.session
+        if (s == null) {
+            s = GeckoSession(sessionSettings(t))
+            attachDelegates(t, s)
+            t.session = s
+        }
+        if (!s.isOpen) s.open(runtime)
+        return s
+    }
+
+    private fun disposeSession(t: BrowserTab) {
+        val s = t.session ?: return
+        if (geckoView.session === s) geckoView.releaseSession()
+        s.close()
+        t.session = null
     }
 
     private fun showCurrent() {
         val t = current ?: return
         contentHost.removeAllViews()
+        geckoView.releaseSession()
+        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
         if (t.showsNewTab) {
             val v = NewTabView(
                 this, c, t.isPrivate,
                 prefs.trackersBlocked + pendingBlocked.get(),
-                prefs.httpsUpgraded + pendingUpgraded.get(),
+                prefs.httpsUpgraded + pendingSecure.get(),
                 version, prefs.bookmarks(),
                 { u -> navigate(u) },
                 { b -> confirmRemoveBookmark(b) }
             )
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
-            var wv = t.webView
-            if (wv == null) {
-                wv = createWebView(t)
-                t.webView = wv
-            }
-            contentHost.addView(wv, FrameLayout.LayoutParams(MATCH, MATCH))
+            val s = ensureSession(t)
+            contentHost.addView(geckoView, FrameLayout.LayoutParams(MATCH, MATCH))
+            geckoView.setSession(s)
+            s.setActive(true)
             val pending = t.pendingUrl
             if (pending != null) {
                 t.pendingUrl = null
-                wv.loadUrl(pending)
+                s.loadUri(pending)
             }
-            wv.onResume()
         }
         refreshChrome()
     }
@@ -458,15 +499,7 @@ class MainActivity : Activity() {
         val idx = tabs.indexOf(t)
         if (idx < 0) return
         tabs.removeAt(idx)
-        t.webView?.let {
-            (it.parent as? ViewGroup)?.removeView(it)
-            it.destroy()
-        }
-        t.webView = null
-        if (t.isPrivate && tabs.none { it.isPrivate }) {
-            // Last private tab gone: wipe the shared HTTP cache.
-            current?.webView?.clearCache(true)
-        }
+        disposeSession(t)
         if (tabs.isEmpty()) {
             current = null
             newTab(null, false)
@@ -490,50 +523,37 @@ class MainActivity : Activity() {
         loadInto(t, url)
     }
 
-    private fun loadInto(t: BrowserTab, rawUrl: String) {
-        val target = maybeUpgrade(t, rawUrl)
-        t.url = target
+    private fun loadInto(t: BrowserTab, url: String) {
+        t.url = url
         t.title = ""
         t.progress = 0
         if (t.showsNewTab) {
             t.showsNewTab = false
-            t.pendingUrl = target
+            t.pendingUrl = url
             showCurrent()
         } else {
-            t.webView?.loadUrl(target)
+            t.session?.loadUri(url)
             refreshChrome()
         }
     }
 
-    private fun maybeUpgrade(t: BrowserTab, url: String): String {
-        t.upgradedFrom = null
-        if (!prefs.httpsUpgrade) return url
-        if (!url.startsWith("http://")) return url
-        val host = try { Uri.parse(url).host } catch (e: Exception) { null }
-        if (Urls.isLocal(host) || host == t.skipUpgradeHost) return url
-        t.upgradedFrom = url
-        pendingUpgraded.incrementAndGet()
-        return "https://" + url.substring(7)
-    }
-
     private fun goBack() {
         val t = current ?: return
-        val wv = t.webView
-        if (!t.showsNewTab && wv != null && wv.canGoBack()) wv.goBack() else onBackPressed()
+        if (!t.showsNewTab && t.canGoBack) t.session?.goBack() else onBackPressed()
     }
 
     private fun goForward() {
-        val wv = current?.webView ?: return
-        if (wv.canGoForward()) wv.goForward()
+        val t = current ?: return
+        if (t.canGoForward) t.session?.goForward()
     }
 
     private fun onReloadClicked() {
         val t = current ?: return
-        val wv = t.webView ?: return
+        val s = t.session ?: return
         if (t.progress in 1..99) {
-            wv.stopLoading()
+            s.stop()
         } else {
-            wv.reload()
+            s.reload()
             reloadIcon.animate().rotationBy(360f).setDuration(480L)
                 .setInterpolator(DecelerateInterpolator()).start()
         }
@@ -550,228 +570,265 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------------------------------------------------------------- WebView
+    // ---------------------------------------------------------------- engine callbacks
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(t: BrowserTab): WebView {
-        val wv = WebView(this)
-        wv.setBackgroundColor(c.bg)
-        val s = wv.settings
-        s.javaScriptEnabled = prefs.javascript
-        s.domStorageEnabled = true
-        s.allowFileAccess = false
-        s.allowContentAccess = false
-        s.setGeolocationEnabled(false)
-        s.mediaPlaybackRequiresUserGesture = true
-        s.setSupportMultipleWindows(true)
-        s.javaScriptCanOpenWindowsAutomatically = false
-        s.useWideViewPort = true
-        s.loadWithOverviewMode = true
-        s.setSupportZoom(true)
-        s.builtInZoomControls = true
-        s.displayZoomControls = false
-        s.setSafeBrowsingEnabled(prefs.safeBrowsing)
-        if (t.isPrivate) s.cacheMode = WebSettings.LOAD_NO_CACHE
-        s.userAgentString = userAgentFor(wv, t.desktop)
+    /** Receives everything a tab's GeckoSession reports and asks the UI to do. */
+    private inner class TabDelegate(private val tab: BrowserTab) :
+        GeckoSession.NavigationDelegate,
+        GeckoSession.ProgressDelegate,
+        GeckoSession.ContentDelegate,
+        GeckoSession.PromptDelegate,
+        ContentBlocking.Delegate {
 
-        CookieManager.getInstance().setAcceptThirdPartyCookies(wv, !prefs.blockThirdPartyCookies)
+        // ----- navigation
 
-        wv.webViewClient = FacetClient(t)
-        wv.webChromeClient = FacetChromeClient(t)
-        wv.setDownloadListener(DownloadListener { url, ua, cd, mime, _ -> startDownload(url, ua, cd, mime) })
-        wv.setOnLongClickListener { onWebLongPress(wv, t) }
-        return wv
-    }
-
-    private fun userAgentFor(wv: WebView, desktop: Boolean): String {
-        val base = wv.settings.userAgentString
-        val chrome = Regex("Chrome/[\\d.]+").find(base)?.value ?: "Chrome/120.0.0.0"
-        if (desktop) {
-            return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) $chrome Safari/537.36"
+        override fun onLocationChange(
+            session: GeckoSession,
+            url: String?,
+            perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>,
+            hasUserGesture: Boolean
+        ) {
+            if (url != null) tab.url = url
+            if (tab === current) refreshChrome()
         }
-        // Drop the WebView markers so sites treat Facet like a normal mobile Chrome.
-        return base.replace("; wv", "").replace(Regex("Version/\\d+\\.\\d+ "), "")
-    }
 
-    private fun applySettingsToAll() {
-        for (t in tabs) {
-            val wv = t.webView ?: continue
-            wv.settings.javaScriptEnabled = prefs.javascript
-            wv.settings.setSafeBrowsingEnabled(prefs.safeBrowsing)
-            CookieManager.getInstance().setAcceptThirdPartyCookies(wv, !prefs.blockThirdPartyCookies)
+        override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
+            tab.canGoBack = canGoBack
+            if (tab === current) refreshChrome()
         }
-    }
 
-    private inner class FacetClient(private val tab: BrowserTab) : WebViewClient() {
+        override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
+            tab.canGoForward = canGoForward
+            if (tab === current) refreshChrome()
+        }
 
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            val uri = request.url
-            val scheme = uri.scheme ?: return false
-            when (scheme) {
-                "http" -> {
-                    if (request.isForMainFrame && prefs.httpsUpgrade) {
-                        val raw = uri.toString()
-                        val up = maybeUpgrade(tab, raw)
-                        if (up != raw) {
-                            view.loadUrl(up)
-                            return true
-                        }
-                    }
-                    return false
-                }
-                "https", "about", "data", "blob", "javascript" -> return false
+        override fun onLoadRequest(
+            session: GeckoSession,
+            request: GeckoSession.NavigationDelegate.LoadRequest
+        ): GeckoResult<AllowOrDeny>? {
+            val uri = Uri.parse(request.uri)
+            when (uri.scheme) {
                 "mailto", "tel", "sms", "geo" -> {
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, uri))
                     } catch (e: ActivityNotFoundException) {
                         // no app for it
                     }
-                    return true
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
-                else -> return true // ignore every other scheme (intent:, market:, ...)
-            }
-        }
-
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            if (prefs.blockTrackers && !request.isForMainFrame) {
-                val host = request.url.host
-                if (host != null && blocklist.isBlocked(host)) {
-                    pendingBlocked.incrementAndGet()
-                    return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(emptyBytes))
-                }
+                "intent", "market" -> return GeckoResult.fromValue(AllowOrDeny.DENY)
             }
             return null
         }
 
-        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-            if (url != null) tab.url = url
-            tab.title = ""
-            if (tab === current) refreshChrome()
-        }
-
-        override fun onPageFinished(view: WebView, url: String?) {
-            if (url != null) tab.url = url
-            tab.title = view.title ?: ""
-            tab.progress = 100
-            if (tab === current) refreshChrome()
-        }
-
-        override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-            if (url != null) tab.url = url
-            if (tab === current) refreshChrome()
-        }
-
-        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (!request.isForMainFrame) return
-            val original = tab.upgradedFrom ?: return
-            // The https upgrade failed: fall back to the page the user actually asked for.
-            tab.upgradedFrom = null
-            tab.skipUpgradeHost = try { Uri.parse(original).host } catch (e: Exception) { null }
-            view.loadUrl(original)
-        }
-    }
-
-    private inner class FacetChromeClient(private val tab: BrowserTab) : WebChromeClient() {
-
-        override fun onProgressChanged(view: WebView, newProgress: Int) {
-            tab.progress = newProgress
-            if (tab === current) refreshChrome()
-        }
-
-        override fun onReceivedTitle(view: WebView, title: String?) {
-            tab.title = title ?: ""
-        }
-
-        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
-            if (!isUserGesture) return false // block pop-ups
+        override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
             val nt = BrowserTab(nextId++, tab.isPrivate)
             nt.showsNewTab = false
             nt.closeOnBack = true
-            val wv = createWebView(nt)
-            nt.webView = wv
+            nt.url = uri
+            val ns = GeckoSession(sessionSettings(nt))
+            attachDelegates(nt, ns)
+            nt.session = ns
             tabs.add(nt)
-            val transport = resultMsg.obj as WebView.WebViewTransport
-            transport.webView = wv
-            resultMsg.sendToTarget()
-            selectTab(nt)
-            return true
+            // The engine opens the new session right after this returns; select the tab afterwards.
+            geckoView.post { selectTab(nt) }
+            return GeckoResult.fromValue(ns)
         }
 
-        override fun onCloseWindow(window: WebView) {
+        // ----- progress
+
+        override fun onPageStart(session: GeckoSession, url: String) {
+            tab.url = url
+            tab.title = ""
+            tab.progress = 5
+            if (tab === current) refreshChrome()
+        }
+
+        override fun onPageStop(session: GeckoSession, success: Boolean) {
+            tab.progress = 100
+            if (success && tab.secure && !tab.isPrivate) pendingSecure.incrementAndGet()
+            if (tab === current) refreshChrome()
+        }
+
+        override fun onProgressChange(session: GeckoSession, progress: Int) {
+            tab.progress = progress
+            if (tab === current) refreshChrome()
+        }
+
+        override fun onSecurityChange(
+            session: GeckoSession,
+            securityInfo: GeckoSession.ProgressDelegate.SecurityInformation
+        ) {
+            tab.secure = securityInfo.isSecure
+            if (tab === current) refreshChrome()
+        }
+
+        // ----- content
+
+        override fun onTitleChange(session: GeckoSession, title: String?) {
+            tab.title = title ?: ""
+        }
+
+        override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+            setFullscreen(fullScreen)
+        }
+
+        override fun onCloseRequest(session: GeckoSession) {
             closeTab(tab)
         }
 
-        override fun onShowFileChooser(
-            webView: WebView,
-            filePathCallback: ValueCallback<Array<Uri>>,
-            fileChooserParams: FileChooserParams
-        ): Boolean {
-            fileCallback?.onReceiveValue(null)
-            fileCallback = filePathCallback
-            return try {
-                startActivityForResult(fileChooserParams.createIntent(), REQ_FILE)
-                true
+        override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+            startDownload(response.uri, response.filename, response.headers["content-type"])
+        }
+
+        override fun onContextMenu(
+            session: GeckoSession,
+            screenX: Int,
+            screenY: Int,
+            element: GeckoSession.ContentDelegate.ContextElement
+        ) {
+            val link = element.linkUri
+            val image = element.srcUri
+            val items = ArrayList<SheetItem>()
+            if (link != null) {
+                items.add(SheetItem(Icon.PLUS, "Open in new tab") { newTab(link, tab.isPrivate, false); toast("Opened in a new tab") })
+                items.add(SheetItem(Icon.PRIVATE, "Open in private tab") { newTab(link, true, false); toast("Opened in a private tab") })
+                items.add(SheetItem(Icon.LINK, "Copy link") { copyText(link) })
+                items.add(SheetItem(Icon.SHARE, "Share link") { share(link) })
+            }
+            if (image != null && element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE) {
+                items.add(SheetItem(Icon.LINK, "Copy image link") { copyText(image) })
+                items.add(SheetItem(Icon.PLUS, "Open image in new tab") { newTab(image, tab.isPrivate, false) })
+            }
+            if (items.isEmpty()) return
+            showSheet(Urls.host(link ?: image ?: ""), items)
+        }
+
+        // ----- tracker stats
+
+        override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+            if (event.isBlocking) pendingBlocked.incrementAndGet()
+        }
+
+        // ----- prompts (alerts, confirms, <select> lists, file pickers) shown as Facet sheets
+
+        override fun onAlertPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.AlertPrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val res = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(null, "OK") { res.complete(prompt.dismiss()) })
+            showSheet(prompt.message ?: prompt.title ?: "", items) { res.complete(prompt.dismiss()) }
+            return res
+        }
+
+        override fun onButtonPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ButtonPrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val res = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(null, "OK") {
+                res.complete(prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+            })
+            items.add(SheetItem(null, "Cancel") {
+                res.complete(prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+            })
+            showSheet(prompt.message ?: prompt.title ?: "", items) { res.complete(prompt.dismiss()) }
+            return res
+        }
+
+        override fun onChoicePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ChoicePrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val res = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val items = ArrayList<SheetItem>()
+            val multiple = prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE
+            addChoices(prompt.choices, items) { id ->
+                if (multiple) {
+                    res.complete(prompt.confirm(arrayOf(id)))
+                } else {
+                    res.complete(prompt.confirm(id))
+                }
+            }
+            showSheet(prompt.title ?: "", items) { res.complete(prompt.dismiss()) }
+            return res
+        }
+
+        override fun onFilePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.FilePrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val res = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            pendingFile = Pair(prompt, res)
+            val i = Intent(Intent.ACTION_GET_CONTENT)
+            i.addCategory(Intent.CATEGORY_OPENABLE)
+            i.type = "*/*"
+            val mimes = prompt.mimeTypes
+            if (mimes != null && mimes.isNotEmpty()) i.putExtra(Intent.EXTRA_MIME_TYPES, mimes)
+            if (prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE) {
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+            try {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent.createChooser(i, "Choose file"), REQ_FILE)
             } catch (e: ActivityNotFoundException) {
-                fileCallback = null
-                filePathCallback.onReceiveValue(null)
-                false
+                pendingFile = null
+                res.complete(prompt.dismiss())
             }
+            return res
         }
 
-        override fun onPermissionRequest(request: PermissionRequest) {
-            request.deny() // camera and microphone are never granted silently
+        override fun onPopupPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.PopupPrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.DENY))
         }
 
-        override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
-            callback.invoke(origin, false, false)
+        override fun onBeforeUnloadPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.BeforeUnloadPrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.ALLOW))
         }
+    }
 
-        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-            if (customView != null) {
-                callback.onCustomViewHidden()
-                return
+    private fun addChoices(
+        choices: Array<GeckoSession.PromptDelegate.ChoicePrompt.Choice>,
+        out: ArrayList<SheetItem>,
+        onPick: (String) -> Unit
+    ) {
+        for (choice in choices) {
+            val sub = choice.items
+            if (sub != null) {
+                addChoices(sub, out, onPick)
+                continue
             }
-            customView = view
-            customCallback = callback
-            view.setBackgroundColor(Color.BLACK)
-            rootFrame.addView(view, FrameLayout.LayoutParams(MATCH, MATCH))
-            hideSystemBars()
-        }
-
-        override fun onHideCustomView() {
-            hideCustomView()
+            if (choice.disabled || choice.separator) continue
+            val id = choice.id
+            out.add(SheetItem(null, choice.label ?: "") { onPick(id) })
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun hideSystemBars() {
-        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    private fun setFullscreen(on: Boolean) {
+        fullscreen = on
+        bottomBar.visibility = if (on) View.GONE else View.VISIBLE
+        progressLine.visibility = if (on) View.GONE else View.VISIBLE
+        if (on) hideSystemBars() else applySystemBars()
     }
 
-    private fun hideCustomView() {
-        val v = customView ?: return
-        rootFrame.removeView(v)
-        customCallback?.onCustomViewHidden()
-        customView = null
-        customCallback = null
-        applySystemBars()
-    }
-
-    private fun startDownload(url: String, ua: String?, contentDisposition: String?, mime: String?) {
-        if (url.startsWith("blob:") || url.startsWith("data:")) {
+    private fun startDownload(url: String, filename: String?, mime: String?) {
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) {
             toast("This download type isn't supported yet")
             return
         }
         try {
-            val name = URLUtil.guessFileName(url, contentDisposition, mime)
+            val name = if (!filename.isNullOrEmpty()) filename else URLUtil.guessFileName(url, null, mime)
             val req = DownloadManager.Request(Uri.parse(url))
             if (mime != null) req.setMimeType(mime)
-            if (ua != null) req.addRequestHeader("User-Agent", ua)
-            val cookie = CookieManager.getInstance().getCookie(url)
-            if (cookie != null) req.addRequestHeader("Cookie", cookie)
             req.setTitle(name)
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
@@ -781,23 +838,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             toast("Couldn't start the download")
         }
-    }
-
-    private fun onWebLongPress(wv: WebView, t: BrowserTab): Boolean {
-        val r = wv.hitTestResult
-        val type = r.type
-        val extra = r.extra
-        if (extra == null) return false
-        val isLink = type == WebView.HitTestResult.SRC_ANCHOR_TYPE ||
-                type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
-        if (!isLink) return false
-        val items = ArrayList<SheetItem>()
-        items.add(SheetItem(Icon.PLUS, "Open in new tab") { newTab(extra, t.isPrivate, false); toast("Opened in a new tab") })
-        items.add(SheetItem(Icon.PRIVATE, "Open in private tab") { newTab(extra, true, false); toast("Opened in a private tab") })
-        items.add(SheetItem(Icon.LINK, "Copy link") { copyText(extra) })
-        items.add(SheetItem(Icon.SHARE, "Share link") { share(extra) })
-        showSheet(Urls.host(extra), items)
-        return true
     }
 
     // ---------------------------------------------------------------- overlays
@@ -820,6 +860,7 @@ class MainActivity : Activity() {
         if (v === settingsView) settingsView = null
         if (v is SheetView) {
             rootFrame.removeView(v)
+            v.cancel()
             return
         }
         v.animate().alpha(0f).translationY(dpf(30f)).setDuration(190L)
@@ -830,7 +871,7 @@ class MainActivity : Activity() {
         while (overlays.isNotEmpty()) closeTopOverlay()
     }
 
-    private fun showSheet(title: String?, items: List<SheetItem>) {
+    private fun showSheet(title: String?, items: List<SheetItem>, onCancel: (() -> Unit)? = null) {
         val holder = arrayOfNulls<SheetView>(1)
         val sheet = SheetView(this, c, title, items) {
             val me = holder[0]
@@ -839,6 +880,7 @@ class MainActivity : Activity() {
                 rootFrame.removeView(me)
             }
         }
+        sheet.onCancel = onCancel
         holder[0] = sheet
         showOverlay(sheet)
     }
@@ -883,7 +925,7 @@ class MainActivity : Activity() {
             this, c, prefs, version,
             { pendingBlocked.get().toLong() },
             { closeTopOverlay() },
-            { applySettingsToAll() },
+            { FacetApp.applyPrefs(runtime, prefs) },
             {
                 val items = ArrayList<SheetItem>()
                 for (e in Urls.engines) {
@@ -932,8 +974,7 @@ class MainActivity : Activity() {
             list.remove(existing)
             toast("Bookmark removed")
         } else {
-            val title = t.webView?.title ?: t.title
-            list.add(Bookmark(if (title.isNullOrBlank()) Urls.host(url) else title, url))
+            list.add(Bookmark(if (t.title.isBlank()) Urls.host(url) else t.title, url))
             toast("Bookmarked")
         }
         prefs.saveBookmarks(list)
@@ -953,9 +994,14 @@ class MainActivity : Activity() {
 
     private fun toggleDesktop(t: BrowserTab) {
         t.desktop = !t.desktop
-        val wv = t.webView ?: return
-        wv.settings.userAgentString = userAgentFor(wv, t.desktop)
-        wv.reload()
+        val s = t.session ?: return
+        s.settings.setUserAgentMode(
+            if (t.desktop) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
+        )
+        s.settings.setViewportMode(
+            if (t.desktop) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
+        )
+        s.reload()
     }
 
     private fun share(url: String) {
@@ -972,13 +1018,7 @@ class MainActivity : Activity() {
     }
 
     private fun clearBrowsingData() {
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
-        for (t in tabs) {
-            t.webView?.clearCache(true)
-            t.webView?.clearHistory()
-        }
+        runtime.storageController.clearData(StorageController.ClearFlags.ALL)
         toast("Browsing data cleared")
     }
 
@@ -991,7 +1031,7 @@ class MainActivity : Activity() {
     private fun flushStats() {
         val b = pendingBlocked.getAndSet(0)
         if (b > 0) prefs.trackersBlocked = prefs.trackersBlocked + b
-        val u = pendingUpgraded.getAndSet(0)
+        val u = pendingSecure.getAndSet(0)
         if (u > 0) prefs.httpsUpgraded = prefs.httpsUpgraded + u
     }
 

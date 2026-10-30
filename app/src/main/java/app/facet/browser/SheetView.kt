@@ -26,6 +26,17 @@ class SheetView(
 ) : FrameLayout(ctx) {
 
     private var leaving = false
+    private var chosen = false
+
+    /** Called when the sheet is dismissed without any row being picked. */
+    var onCancel: (() -> Unit)? = null
+
+    /** Reports a dismissal that didn't pick a row (scrim tap or Back). Runs at most once. */
+    fun cancel() {
+        if (chosen) return
+        chosen = true
+        onCancel?.invoke()
+    }
     private val scrim = View(ctx)
     private val card = LinearLayout(ctx)
 
@@ -43,7 +54,7 @@ class SheetView(
         isClickable = true
         scrim.setBackgroundColor(0x66000000)
         scrim.alpha = 0f
-        scrim.setOnClickListener { animateOut { onDismiss() } }
+        scrim.setOnClickListener { animateOut { onDismiss(); cancel() } }
         addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
 
         val r = ctx.dpf(24f)
@@ -87,6 +98,7 @@ class SheetView(
                 row.addView(IconView(ctx, Icon.CHECK, c.accent, 20), LinearLayout.LayoutParams(ctx.dp(20), ctx.dp(20)))
             }
             row.setOnClickListener {
+                chosen = true
                 animateOut {
                     onDismiss()
                     item.action()

@@ -59,13 +59,13 @@ class SettingsView(
         val nf = NumberFormat.getIntegerInstance()
 
         section("Privacy")
-        toggle("Block ads and trackers", "Stops known ad, analytics and tracking hosts from loading.", prefs.blockTrackers) {
+        toggle("Block ads and trackers", "Strict tracking protection: ads, analytics, social trackers, fingerprinters and cryptominers.", prefs.blockTrackers) {
             prefs.blockTrackers = it; onToggled()
         }
-        toggle("Block third-party cookies", "Sites can't follow you across other sites with cookies.", prefs.blockThirdPartyCookies) {
+        toggle("Isolate third-party cookies", "Cookies from other sites stay locked to the site that set them.", prefs.blockThirdPartyCookies) {
             prefs.blockThirdPartyCookies = it; onToggled()
         }
-        toggle("Upgrade to HTTPS", "Opens http:// pages over https:// when the site supports it.", prefs.httpsUpgrade) {
+        toggle("HTTPS-only mode", "Only opens secure pages, and warns before using an insecure one.", prefs.httpsUpgrade) {
             prefs.httpsUpgrade = it; onToggled()
         }
         toggle("Safe Browsing", "Warns about dangerous sites. Checks hash prefixes with Google.", prefs.safeBrowsing) {
@@ -91,13 +91,13 @@ class SettingsView(
         section("Stats")
         val blocked = prefs.trackersBlocked + pendingBlocked()
         stat("Trackers blocked", nf.format(blocked))
-        stat("Pages upgraded to HTTPS", nf.format(prefs.httpsUpgraded))
+        stat("Secure page loads", nf.format(prefs.httpsUpgraded))
 
         section("About")
         stat("Version", version)
         val note = makeText(
             ctx,
-            "Facet collects nothing: no accounts, no analytics, no telemetry. Open source.",
+            "Facet collects nothing: no accounts, no analytics, no telemetry. Powered by Mozilla's GeckoView engine, bundled inside the app.",
             13f, c.muted, Fonts.sans
         )
         note.setLineSpacing(0f, 1.2f)

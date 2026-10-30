@@ -1,69 +1,46 @@
 # Facet
 
-A fast, private, uncluttered web browser for Android. Written from scratch in Kotlin
-on top of Android's built-in Chromium (WebView). No accounts, no analytics, no telemetry.
+A fast, private, uncluttered browser for Android. The interface is written from scratch in
+Kotlin, and the engine is **GeckoView**, Mozilla's browser engine, bundled inside the app.
+Facet does not use the system WebView and does not depend on any other browser app.
 
-Cromite was used as a reference for which privacy defaults matter. No code was copied.
+GeckoView is used as an ordinary dependency from Mozilla's Maven server. Nothing from
+Mozilla's source tree is copied or forked. GeckoView is licensed under the MPL 2.0.
 
 ## v1.0
 
-- **Tabs** with a card-style tab switcher, plus **private tabs** (no history, no cache)
-- **Address bar** at the bottom: type an address or a search, one field for both
-- **Ad and tracker blocking** from a built-in host list (`app/src/main/assets/blocklist.txt`)
-- **Third-party cookie blocking**, **HTTPS upgrades** with automatic fallback
-- Camera, microphone and location are **denied by default**; pop-ups are blocked
+- Tabs with a card-style switcher, and **private tabs that are truly isolated** from normal tabs
+- Address bar at the bottom: one field for addresses and searches
+- **Strict tracking protection** (ads, analytics, social trackers, fingerprinters, cryptominers)
+- Third-party cookie isolation and **HTTPS-only mode**
+- Camera, microphone and location denied by default, pop-ups blocked
 - Bookmarks, downloads, share, desktop site, restore tabs
-- **Paper** theme (light) and **Paper Dark**, the same palette as Prism Client
-- Prism Serif for headings, Prism Sans for text, across the whole app UI
+- Paper and Paper Dark themes, Prism Serif headings and Prism Sans text throughout
+- Animated interface
 
-Search engines: DuckDuckGo (default), Brave Search, Startpage, Ecosia, Google.
-
-## Honest limits
-
-Facet uses the system WebView instead of its own browser engine. That keeps it small
-and quick to build, but it means:
-
-- No Chrome extensions and no sync.
-- **Private tabs share the cookie jar with normal tabs.** They save no history, skip the
-  cache, and wipe the cache when the last private tab closes, but a site you are logged
-  into in a normal tab will still see you in a private one.
-- Blocking works at the request level using a host list, not cosmetic filtering.
-- Safe Browsing is on by default and checks hash prefixes with Google. Turn it off in Settings.
+Coming next: built-in extension support (WebExtensions) and an encrypted password vault.
 
 ## Building
 
-Debug APKs are built by GitHub Actions (`.github/workflows/build.yml`).
+GitHub Actions builds the APK on every push (`.github/workflows/build.yml`). Download it from
+the run's **Artifacts**. Pushing a tag such as `v1.0` or `v2.0` publishes a GitHub Release.
 
-- Every push builds an APK, downloadable from the run's **Artifacts**.
-- Pushing a tag like `v1.0` or `v2.0` builds the APK and attaches it to a **GitHub Release**.
-  The tag sets the version: `v2.0` becomes versionName `2.0` and versionCode `2`.
+`gradle.properties` has `geckoVersion=LATEST`, which makes CI look up the newest GeckoView.
+Replace it with a real version number to pin the engine.
 
-To build locally you need JDK 17, the Android SDK (platform 34) and Gradle 8.9:
-
-```
-gradle assembleDebug
-```
+Local build: JDK 17, Android SDK 35 and Gradle 8.9, then
+`gradle assembleDebug -PgeckoVersion=<version>`.
 
 ### Signing
 
-Without secrets, CI signs with a throwaway debug key, so each build has a different
-signature and cannot be installed over the previous one. For updates that install over
-each other, add these repository secrets:
-
-| Secret | Value |
-| --- | --- |
-| `FACET_KEYSTORE_B64` | your keystore file, base64-encoded |
-| `FACET_KEYSTORE_PASSWORD` | keystore password |
-| `FACET_KEY_ALIAS` | key alias |
-| `FACET_KEY_PASSWORD` | key password |
+Without secrets, CI signs with a throwaway debug key, so builds can't be installed over each
+other. For stable signing add these repository secrets: `FACET_KEYSTORE_B64`,
+`FACET_KEYSTORE_PASSWORD`, `FACET_KEY_ALIAS`, `FACET_KEY_PASSWORD`.
 
 ## Fonts
 
-`app/src/main/assets/fonts` holds the Prism Sans and Prism Serif font files, obtained from
-MoonBear. They are **not** part of the MIT license and come with no redistribution
-permission in the download. **Remove that folder before making this repository public.**
-Facet falls back to the system serif and sans-serif fonts when the files are missing, so the
-build still works without them.
+The Prism Sans and Prism Serif fonts are bundled in `app/src/main/assets/fonts` and used across
+the whole app. The font files are not covered by the MIT license.
 
 ## License
 

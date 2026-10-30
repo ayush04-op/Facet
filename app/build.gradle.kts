@@ -9,9 +9,12 @@ val facetVersionCode: Int = (project.findProperty("versionCode") as String?)?.to
     ?: facetVersionName.substringBefore('.').toIntOrNull()
     ?: 1
 
+val geckoVersion: String = (project.findProperty("geckoVersion") as String?) ?: "LATEST"
+val geckoArtifact: String = (project.findProperty("geckoArtifact") as String?) ?: "geckoview-arm64-v8a"
+
 android {
     namespace = "app.facet.browser"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "app.facet.browser"
@@ -53,4 +56,9 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
     }
+}
+
+dependencies {
+    // Mozilla's browser engine, bundled inside the APK. Facet is standalone: no system WebView.
+    implementation("org.mozilla.geckoview:$geckoArtifact:$geckoVersion")
 }
