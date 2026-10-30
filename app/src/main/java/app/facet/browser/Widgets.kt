@@ -179,8 +179,8 @@ class SwitchView(context: Context, private val c: Colors, checked: Boolean) : Vi
     init {
         isClickable = true
         setOnClickListener {
-            checked = !checked
-            onChange?.invoke(checked)
+            this.checked = !this.checked
+            onChange?.invoke(this.checked)
         }
     }
 

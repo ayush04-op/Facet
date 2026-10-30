@@ -867,9 +867,9 @@ class MainActivity : Activity() {
             },
             {
                 val items = ArrayList<SheetItem>()
-                items.add(SheetItem(null, "Match system", prefs.theme == 0) { setTheme(0) })
-                items.add(SheetItem(null, "Paper (light)", prefs.theme == 1) { setTheme(1) })
-                items.add(SheetItem(null, "Paper Dark", prefs.theme == 2) { setTheme(2) })
+                items.add(SheetItem(null, "Match system", prefs.theme == 0) { applyThemeMode(0) })
+                items.add(SheetItem(null, "Paper (light)", prefs.theme == 1) { applyThemeMode(1) })
+                items.add(SheetItem(null, "Paper Dark", prefs.theme == 2) { applyThemeMode(2) })
                 showSheet("Theme", items)
             },
             {
@@ -887,7 +887,7 @@ class MainActivity : Activity() {
         showOverlay(sv)
     }
 
-    private fun setTheme(mode: Int) {
+    private fun applyThemeMode(mode: Int) {
         prefs.theme = mode
         rebuildUi()
         showSettings()
