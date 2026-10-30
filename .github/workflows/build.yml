@@ -45,14 +45,14 @@ jobs:
             echo "No FACET_KEYSTORE_B64 secret: this build is signed with a throwaway debug key."
           fi
 
-      - name: Build release APK
+      - name: Build debug APK
         env:
           FACET_KEYSTORE_PASSWORD: ${{ secrets.FACET_KEYSTORE_PASSWORD }}
           FACET_KEY_ALIAS: ${{ secrets.FACET_KEY_ALIAS }}
           FACET_KEY_PASSWORD: ${{ secrets.FACET_KEY_PASSWORD }}
         run: |
           set +e
-          gradle --no-daemon --console=plain assembleRelease -PversionName=${{ steps.ver.outputs.name }} 2>&1 | tee build.log
+          gradle --no-daemon --console=plain assembleDebug -PversionName=${{ steps.ver.outputs.name }} 2>&1 | tee build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             msg=$(grep -E '^e: |What went wrong|Execution failed|error:' -A3 build.log | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
@@ -61,7 +61,7 @@ jobs:
           exit $code
 
       - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk "Facet-v${{ steps.ver.outputs.name }}.apk"
+        run: cp app/build/outputs/apk/debug/app-debug.apk "Facet-v${{ steps.ver.outputs.name }}-debug.apk"
 
       - uses: actions/upload-artifact@v4
         with:

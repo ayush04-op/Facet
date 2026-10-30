@@ -32,7 +32,7 @@ and quick to build, but it means:
 
 ## Building
 
-Releases are built by GitHub Actions (`.github/workflows/build.yml`).
+Debug APKs are built by GitHub Actions (`.github/workflows/build.yml`).
 
 - Every push builds an APK, downloadable from the run's **Artifacts**.
 - Pushing a tag like `v1.0` or `v2.0` builds the APK and attaches it to a **GitHub Release**.
@@ -41,7 +41,7 @@ Releases are built by GitHub Actions (`.github/workflows/build.yml`).
 To build locally you need JDK 17, the Android SDK (platform 34) and Gradle 8.9:
 
 ```
-gradle assembleRelease
+gradle assembleDebug
 ```
 
 ### Signing
