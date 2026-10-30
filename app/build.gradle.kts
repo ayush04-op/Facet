@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 // Release version comes from the git tag in CI (-PversionName=2.0); defaults to 1.0 locally.
@@ -14,7 +13,7 @@ val geckoArtifact: String = (project.findProperty("geckoArtifact") as String?) ?
 
 android {
     namespace = "app.facet.browser"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.facet.browser"
@@ -48,9 +47,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
     }
     lint {
         checkReleaseBuilds = false
