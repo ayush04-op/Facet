@@ -70,6 +70,7 @@ class SettingsView(
         kit.add(priv, kit.toggle(Icon.LINK, "JavaScript", "Turning this off blocks most trackers but breaks many sites.", prefs.javascript) {
             prefs.javascript = it; onToggled()
         })
+        kit.add(priv, kit.info("Passkeys", "Built in (Android 14+)"))
         put(priv)
 
         body.addView(kit.section("Browsing"))

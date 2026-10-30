@@ -67,6 +67,7 @@ class MainActivity : Activity() {
     private var settingsView: SettingsView? = null
 
     private var fullscreen = false
+    private var pendingActivity: GeckoResult<Intent>? = null
     private var pendingFile: Pair<GeckoSession.PromptDelegate.FilePrompt, GeckoResult<GeckoSession.PromptDelegate.PromptResponse>>? = null
 
     private val pendingBlocked = AtomicInteger(0)
@@ -85,6 +86,18 @@ class MainActivity : Activity() {
         }
         autoCheckUpdates()
         runtime = FacetApp.runtime(this)
+        // Passkeys: GeckoView hands system sign-in screens (Credential Manager) to the activity.
+        runtime.activityDelegate = GeckoRuntime.ActivityDelegate { pi ->
+            val res = GeckoResult<Intent>()
+            pendingActivity = res
+            try {
+                startIntentSenderForResult(pi.intentSender, REQ_GECKO, null, 0, 0, 0)
+            } catch (e: Exception) {
+                pendingActivity = null
+                res.completeExceptionally(e)
+            }
+            res
+        }
         geckoView = GeckoView(this)
 
         buildUi()
@@ -175,6 +188,13 @@ class MainActivity : Activity() {
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_GECKO) {
+            val pa = pendingActivity
+            pendingActivity = null
+            if (resultCode == RESULT_OK && data != null) pa?.complete(data)
+            else pa?.completeExceptionally(RuntimeException("Cancelled"))
+            return
+        }
         if (requestCode == REQ_FILE) {
             val pf = pendingFile
             pendingFile = null
@@ -789,6 +809,21 @@ class MainActivity : Activity() {
             return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.DENY))
         }
 
+        override fun onWebAuthnRelatedOriginPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.WebAuthnRelatedOriginPrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val res = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val what = if (prompt.isCreate) "Create a passkey" else "Use a passkey"
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(Icon.LOCK, "Allow") { res.complete(prompt.confirm(AllowOrDeny.ALLOW)) })
+            items.add(SheetItem(null, "Don't allow") { res.complete(prompt.confirm(AllowOrDeny.DENY)) })
+            showSheet("$what for ${prompt.rpId} on ${Urls.host(prompt.origin ?: "")}?", items) {
+                res.complete(prompt.confirm(AllowOrDeny.DENY))
+            }
+            return res
+        }
+
         override fun onBeforeUnloadPrompt(
             session: GeckoSession,
             prompt: GeckoSession.PromptDelegate.BeforeUnloadPrompt
@@ -1109,5 +1144,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_FILE = 1001
+        private const val REQ_GECKO = 1002
     }
 }
