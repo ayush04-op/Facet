@@ -1,5 +1,9 @@
 package app.facet.browser
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -7,6 +11,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
 
 enum class Icon {
@@ -168,13 +173,19 @@ class IconView(context: Context, icon: Icon, tint: Int, private val sizeDp: Int 
     }
 }
 
-/** Pill-shaped on/off switch in the Paper style. */
+/** Pill-shaped on/off switch in the Paper style, with an animated knob. */
 class SwitchView(context: Context, private val c: Colors, checked: Boolean) : View(context) {
+    private var pos: Float = if (checked) 1f else 0f
     var checked: Boolean = checked
-        set(v) { field = v; invalidate() }
+        set(v) {
+            if (field == v) return
+            field = v
+            animatePos()
+        }
     var onChange: ((Boolean) -> Unit)? = null
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val argb = ArgbEvaluator()
 
     init {
         isClickable = true
@@ -182,6 +193,17 @@ class SwitchView(context: Context, private val c: Colors, checked: Boolean) : Vi
             this.checked = !this.checked
             onChange?.invoke(this.checked)
         }
+    }
+
+    private fun animatePos() {
+        val a = ValueAnimator.ofFloat(pos, if (checked) 1f else 0f)
+        a.duration = 220L
+        a.interpolator = DecelerateInterpolator(1.6f)
+        a.addUpdateListener {
+            pos = it.animatedValue as Float
+            invalidate()
+        }
+        a.start()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -192,11 +214,13 @@ class SwitchView(context: Context, private val c: Colors, checked: Boolean) : Vi
         val w = width.toFloat()
         val h = height.toFloat()
         paint.style = Paint.Style.FILL
-        paint.color = if (checked) c.accent else c.line
+        paint.color = argb.evaluate(pos, c.line, c.accent) as Int
         canvas.drawRoundRect(RectF(0f, 0f, w, h), h / 2, h / 2, paint)
         val pad = context.dpf(3f)
         val r = h / 2 - pad
-        val cx = if (checked) w - pad - r else pad + r
+        val left = pad + r
+        val right = w - pad - r
+        val cx = left + (right - left) * pos
         paint.color = 0xFFFFFFFF.toInt()
         canvas.drawCircle(cx, h / 2, r, paint)
     }
@@ -244,16 +268,54 @@ class GridBackground(context: Context, private val c: Colors) : View(context) {
     }
 }
 
-/** Thin accent line under the page that fills as it loads. */
+/** Thin accent line under the page that glides forward as it loads, then fades out. */
 class ProgressLine(context: Context, private val c: Colors) : View(context) {
-    var progress: Int = 0
-        set(v) { field = v; invalidate() }
-
+    private var shown = 0f
+    private var anim: ValueAnimator? = null
     private val paint = Paint().apply { color = c.accent }
 
+    var progress: Int = 0
+        set(v) {
+            if (v == field) return
+            field = v
+            animateTo(v)
+        }
+
+    private fun animateTo(target: Int) {
+        anim?.cancel()
+        animate().cancel()
+        alpha = 1f
+        if (target <= 0) {
+            shown = 0f
+            invalidate()
+            return
+        }
+        if (target < shown) shown = 0f
+        val a = ValueAnimator.ofFloat(shown, target.toFloat())
+        a.duration = 240L
+        a.interpolator = DecelerateInterpolator()
+        a.addUpdateListener {
+            shown = it.animatedValue as Float
+            invalidate()
+        }
+        if (target >= 100) {
+            a.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    animate().alpha(0f).setStartDelay(140L).setDuration(260L).withEndAction {
+                        shown = 0f
+                        alpha = 1f
+                        invalidate()
+                    }.start()
+                }
+            })
+        }
+        anim = a
+        a.start()
+    }
+
     override fun onDraw(canvas: Canvas) {
-        if (progress <= 0 || progress >= 100) return
-        canvas.drawRect(0f, 0f, width * progress / 100f, height.toFloat(), paint)
+        if (shown <= 0f) return
+        canvas.drawRect(0f, 0f, width * shown / 100f, height.toFloat(), paint)
     }
 }
 

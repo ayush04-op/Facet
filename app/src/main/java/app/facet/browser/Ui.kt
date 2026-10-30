@@ -9,7 +9,11 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.text.TextPaint
 import android.text.style.MetricAffectingSpan
+import android.annotation.SuppressLint
 import android.util.TypedValue
+import android.view.MotionEvent
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -61,4 +65,20 @@ fun makeTag(ctx: Context, s: String, color: Int): TextView {
 class FaceSpan(private val face: Typeface) : MetricAffectingSpan() {
     override fun updateDrawState(p: TextPaint) { p.typeface = face }
     override fun updateMeasureState(p: TextPaint) { p.typeface = face }
+}
+
+/** Squashes a view slightly while it is pressed and springs it back on release. */
+@SuppressLint("ClickableViewAccessibility")
+fun View.pressScale(down: Float = 0.92f) {
+    setOnTouchListener { v, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN ->
+                v.animate().scaleX(down).scaleY(down).setDuration(90L)
+                    .setInterpolator(DecelerateInterpolator()).start()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                v.animate().scaleX(1f).scaleY(1f).setDuration(240L)
+                    .setInterpolator(OvershootInterpolator(2.4f)).start()
+        }
+        false
+    }
 }

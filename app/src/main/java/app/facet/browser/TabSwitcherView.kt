@@ -4,6 +4,7 @@ import android.content.Context
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -81,31 +82,46 @@ class TabSwitcherView(
         lp.leftMargin = ctx.dp(8)
         row.addView(t, lp)
         row.setOnClickListener { action() }
+        row.pressScale(0.94f)
         return row
     }
 
-    fun rebuild() {
+    fun rebuild(animate: Boolean = true) {
         gridHost.removeAllViews()
         val list = tabs()
         countTag.text = (if (list.size == 1) "1 TAB" else "${list.size} TABS")
         var i = 0
+        var shownCount = 0
         while (i < list.size) {
             val row = LinearLayout(ctx)
             row.orientation = LinearLayout.HORIZONTAL
             val first = card(list[i])
+            if (animate) enter(first, shownCount++)
             val lp1 = LinearLayout.LayoutParams(0, WRAP, 1f)
             lp1.setMargins(ctx.dp(5), ctx.dp(5), ctx.dp(5), ctx.dp(5))
             row.addView(first, lp1)
             val lp2 = LinearLayout.LayoutParams(0, WRAP, 1f)
             lp2.setMargins(ctx.dp(5), ctx.dp(5), ctx.dp(5), ctx.dp(5))
             if (i + 1 < list.size) {
-                row.addView(card(list[i + 1]), lp2)
+                val second = card(list[i + 1])
+                if (animate) enter(second, shownCount++)
+                row.addView(second, lp2)
             } else {
                 row.addView(View(ctx), lp2)
             }
             gridHost.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
             i += 2
         }
+    }
+
+    private fun enter(v: View, i: Int) {
+        v.alpha = 0f
+        v.scaleX = 0.92f
+        v.scaleY = 0.92f
+        v.translationY = ctx.dpf(16f)
+        v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+            .setStartDelay(40L * i + 40L).setDuration(320L)
+            .setInterpolator(DecelerateInterpolator(2f)).start()
     }
 
     private fun card(tab: BrowserTab): View {
@@ -124,6 +140,7 @@ class TabSwitcherView(
         card.pressable(shape(bgColor, ctx.dpf(18f), stroke, strokeW), withAlpha(fg, 0x22), ctx.dpf(18f))
         card.minimumHeight = ctx.dp(136)
         card.setOnClickListener { onSelect(tab) }
+        card.pressScale(0.96f)
 
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
@@ -135,8 +152,12 @@ class TabSwitcherView(
         close.pressable(null, withAlpha(fg, 0x22), ctx.dpf(18f))
         close.addView(IconView(ctx, Icon.CLOSE, sub, 16), FrameLayout.LayoutParams(ctx.dp(16), ctx.dp(16), Gravity.CENTER))
         close.setOnClickListener {
-            onCloseTab(tab)
-            rebuild()
+            close.isEnabled = false
+            card.animate().alpha(0f).scaleX(0.88f).scaleY(0.88f).setDuration(170L)
+                .withEndAction {
+                    onCloseTab(tab)
+                    rebuild(false)
+                }.start()
         }
         top.addView(close, LinearLayout.LayoutParams(ctx.dp(36), ctx.dp(36)))
         card.addView(top, LinearLayout.LayoutParams(MATCH, WRAP))

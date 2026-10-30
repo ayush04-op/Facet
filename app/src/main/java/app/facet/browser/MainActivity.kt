@@ -22,6 +22,8 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -261,6 +263,7 @@ class MainActivity : Activity() {
         box.addView(iv, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
         box.pressable(null, withAlpha(c.ink, 0x22), dpf(boxDp / 2f))
         box.setOnClickListener { onClick() }
+        box.pressScale(0.84f)
         return Pair(box, iv)
     }
 
@@ -347,7 +350,17 @@ class MainActivity : Activity() {
         val t = current ?: return
         updateAddress()
         progressLine.progress = t.progress
-        tabsIcon.badge = tabs.size.toString()
+        val label = tabs.size.toString()
+        if (tabsIcon.badge != label) {
+            val first = tabsIcon.badge == null
+            tabsIcon.badge = label
+            if (!first) {
+                tabsIcon.animate().scaleX(1.3f).scaleY(1.3f).setDuration(110L).withEndAction {
+                    tabsIcon.animate().scaleX(1f).scaleY(1f).setDuration(240L)
+                        .setInterpolator(OvershootInterpolator(3f)).start()
+                }.start()
+            }
+        }
         val wv = t.webView
         backIcon.alpha = if (!t.showsNewTab || tabs.size > 1) 1f else 0.35f
         forwardIcon.alpha = if (!t.showsNewTab && wv?.canGoForward() == true) 1f else 0.35f
@@ -420,7 +433,6 @@ class MainActivity : Activity() {
                 prefs.trackersBlocked + pendingBlocked.get(),
                 prefs.httpsUpgraded + pendingUpgraded.get(),
                 version, prefs.bookmarks(),
-                { focusAddress() },
                 { u -> navigate(u) },
                 { b -> confirmRemoveBookmark(b) }
             )
@@ -518,7 +530,13 @@ class MainActivity : Activity() {
     private fun onReloadClicked() {
         val t = current ?: return
         val wv = t.webView ?: return
-        if (t.progress in 1..99) wv.stopLoading() else wv.reload()
+        if (t.progress in 1..99) {
+            wv.stopLoading()
+        } else {
+            wv.reload()
+            reloadIcon.animate().rotationBy(360f).setDuration(480L)
+                .setInterpolator(DecelerateInterpolator()).start()
+        }
     }
 
     private fun handleIntent(i: Intent?) {
@@ -787,14 +805,25 @@ class MainActivity : Activity() {
     private fun showOverlay(v: View) {
         overlays.add(v)
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
+        if (v !is SheetView) {
+            v.alpha = 0f
+            v.translationY = dpf(30f)
+            v.animate().alpha(1f).translationY(0f).setDuration(260L)
+                .setInterpolator(DecelerateInterpolator(2f)).start()
+        }
     }
 
     private fun closeTopOverlay() {
         if (overlays.isEmpty()) return
         val v = overlays.removeAt(overlays.size - 1)
-        rootFrame.removeView(v)
         if (v === tabSwitcher) tabSwitcher = null
         if (v === settingsView) settingsView = null
+        if (v is SheetView) {
+            rootFrame.removeView(v)
+            return
+        }
+        v.animate().alpha(0f).translationY(dpf(30f)).setDuration(190L)
+            .withEndAction { rootFrame.removeView(v) }.start()
     }
 
     private fun closeAllOverlays() {

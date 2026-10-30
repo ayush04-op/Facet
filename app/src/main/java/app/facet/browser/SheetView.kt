@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
@@ -24,15 +25,28 @@ class SheetView(
     onDismiss: () -> Unit
 ) : FrameLayout(ctx) {
 
+    private var leaving = false
+    private val scrim = View(ctx)
+    private val card = LinearLayout(ctx)
+
+    /** Slides the card down and fades the scrim, then runs [end]. Ignores repeat taps. */
+    private fun animateOut(end: () -> Unit) {
+        if (leaving) return
+        leaving = true
+        scrim.animate().alpha(0f).setDuration(180L).start()
+        card.animate().translationY(card.height.toFloat() + 8f).setDuration(210L)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction { end() }.start()
+    }
+
     init {
         isClickable = true
-        val scrim = View(ctx)
         scrim.setBackgroundColor(0x66000000)
-        scrim.setOnClickListener { onDismiss() }
+        scrim.alpha = 0f
+        scrim.setOnClickListener { animateOut { onDismiss() } }
         addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
 
         val r = ctx.dpf(24f)
-        val card = LinearLayout(ctx)
         card.orientation = LinearLayout.VERTICAL
         val bg = GradientDrawable()
         bg.setColor(c.bg)
@@ -73,8 +87,10 @@ class SheetView(
                 row.addView(IconView(ctx, Icon.CHECK, c.accent, 20), LinearLayout.LayoutParams(ctx.dp(20), ctx.dp(20)))
             }
             row.setOnClickListener {
-                onDismiss()
-                item.action()
+                animateOut {
+                    onDismiss()
+                    item.action()
+                }
             }
             card.addView(row, LinearLayout.LayoutParams(MATCH, ctx.dp(52)))
         }
@@ -82,5 +98,15 @@ class SheetView(
         val lp = FrameLayout.LayoutParams(MATCH, WRAP)
         lp.gravity = Gravity.BOTTOM
         addView(card, lp)
+
+        // Entrance: hidden until measured, then slide up while the scrim fades in.
+        card.visibility = View.INVISIBLE
+        card.post {
+            card.translationY = card.height.toFloat()
+            card.visibility = View.VISIBLE
+            card.animate().translationY(0f).setDuration(280L)
+                .setInterpolator(DecelerateInterpolator(2f)).start()
+            scrim.animate().alpha(1f).setDuration(220L).start()
+        }
     }
 }

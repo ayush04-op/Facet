@@ -1,5 +1,6 @@
 package app.facet.browser
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.text.Spannable
@@ -8,6 +9,7 @@ import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -22,14 +24,16 @@ class NewTabView(
     upgraded: Long,
     version: String,
     bookmarks: List<Bookmark>,
-    private val onSearch: () -> Unit,
     private val onOpen: (String) -> Unit,
     private val onBookmarkLong: (Bookmark) -> Unit
 ) : FrameLayout(ctx) {
 
     init {
         setBackgroundColor(c.bg)
-        addView(GridBackground(ctx, c), FrameLayout.LayoutParams(MATCH, MATCH))
+        val grid = GridBackground(ctx, c)
+        grid.alpha = 0f
+        grid.animate().alpha(1f).setDuration(700L).start()
+        addView(grid, FrameLayout.LayoutParams(MATCH, MATCH))
 
         val scroll = ScrollView(ctx)
         scroll.isVerticalScrollBarEnabled = false
@@ -76,30 +80,13 @@ class NewTabView(
         subLp.topMargin = ctx.dp(12)
         col.addView(sub, subLp)
 
-        // Search pill
-        val pill = LinearLayout(ctx)
-        pill.orientation = LinearLayout.HORIZONTAL
-        pill.gravity = Gravity.CENTER_VERTICAL
-        pill.setPadding(ctx.dp(18), 0, ctx.dp(18), 0)
-        pill.pressable(shape(c.glass, ctx.dpf(28f), c.line, ctx.dp(1)), withAlpha(c.ink, 0x22), ctx.dpf(28f))
-        pill.setOnClickListener { onSearch() }
-        pill.addView(IconView(ctx, Icon.SEARCH, c.muted, 20), LinearLayout.LayoutParams(ctx.dp(20), ctx.dp(20)))
-        val hint = makeText(ctx, "Search or enter address", 16f, c.muted, Fonts.sans)
-        val hintLp = LinearLayout.LayoutParams(WRAP, WRAP)
-        hintLp.leftMargin = ctx.dp(12)
-        pill.addView(hint, hintLp)
-        val pillLp = LinearLayout.LayoutParams(MATCH, ctx.dp(56))
-        pillLp.topMargin = ctx.dp(28)
-        col.addView(pill, pillLp)
-
         if (!isPrivate) {
             // Row of two stat cards
             val row = LinearLayout(ctx)
             row.orientation = LinearLayout.HORIZONTAL
             val gap = ctx.dp(12)
-            val nf = NumberFormat.getIntegerInstance()
-            val a = statCard(ctx, "Trackers blocked", nf.format(blocked), "since install")
-            val b = statCard(ctx, "Upgraded to HTTPS", nf.format(upgraded), "page loads")
+            val a = statCard(ctx, "Trackers blocked", blocked, "since install")
+            val b = statCard(ctx, "Upgraded to HTTPS", upgraded, "page loads")
             val la = LinearLayout.LayoutParams(0, WRAP, 1f)
             la.rightMargin = gap / 2
             val lb = LinearLayout.LayoutParams(0, WRAP, 1f)
@@ -107,7 +94,7 @@ class NewTabView(
             row.addView(a, la)
             row.addView(b, lb)
             val rowLp = LinearLayout.LayoutParams(MATCH, WRAP)
-            rowLp.topMargin = ctx.dp(20)
+            rowLp.topMargin = ctx.dp(30)
             col.addView(row, rowLp)
 
             // Bookmarks card
@@ -151,14 +138,23 @@ class NewTabView(
         footLp.topMargin = ctx.dp(28)
         col.addView(foot, footLp)
 
+        for (i in 0 until col.childCount) {
+            val v = col.getChildAt(i)
+            v.alpha = 0f
+            v.translationY = ctx.dpf(26f)
+            v.animate().alpha(1f).translationY(0f)
+                .setStartDelay(70L * i + 60L).setDuration(480L)
+                .setInterpolator(DecelerateInterpolator(2.2f)).start()
+        }
         scroll.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
-    private fun statCard(ctx: Context, label: String, value: String, caption: String): BentoCard {
+    private fun statCard(ctx: Context, label: String, value: Long, caption: String): BentoCard {
         val card = BentoCard(ctx, c)
         card.addView(makeTag(ctx, label, c.muted))
-        val num = makeText(ctx, value, 38f, c.ink, Fonts.serif)
+        val num = makeText(ctx, "0", 38f, c.ink, Fonts.serif)
+        countUp(num, value)
         val nlp = LinearLayout.LayoutParams(WRAP, WRAP)
         nlp.topMargin = ctx.dp(14)
         card.addView(num, nlp)
@@ -169,12 +165,24 @@ class NewTabView(
         return card
     }
 
+    private fun countUp(tv: TextView, target: Long) {
+        if (target <= 0L) return
+        val nf = NumberFormat.getIntegerInstance()
+        val a = ValueAnimator.ofFloat(0f, 1f)
+        a.duration = 900L
+        a.startDelay = 380L
+        a.interpolator = DecelerateInterpolator(2f)
+        a.addUpdateListener { tv.text = nf.format((target * (it.animatedValue as Float)).toLong()) }
+        a.start()
+    }
+
     private fun bookmarkRow(ctx: Context, b: Bookmark): View {
         val row = LinearLayout(ctx)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
         row.pressable(null, withAlpha(c.ink, 0x1A), ctx.dpf(12f))
         row.setOnClickListener { onOpen(b.url) }
+        row.pressScale(0.96f)
         row.setOnLongClickListener { onBookmarkLong(b); true }
 
         val label = if (b.title.isNotBlank()) b.title else Urls.host(b.url)
