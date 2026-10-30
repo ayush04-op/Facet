@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Facet</AssemblyName>
+    <RootNamespace>Facet</RootNamespace>
+    <Version>1.0</Version>
+    <Product>Facet</Product>
+    <Company>Ayush</Company>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CEF (Chromium Embedded Framework) is bundled with the app: Facet does not need Edge or any other browser. -->
+    <PackageReference Include="CefSharp.Wpf.NETCore" Version="*" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The same Prism fonts the Android app uses, embedded in the executable. -->
+    <Resource Include="..\app\src\main\assets\fonts\*.otf" Link="Fonts\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
