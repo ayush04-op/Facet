@@ -678,7 +678,7 @@ class MainActivity : Activity() {
         }
 
         override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
-            startDownload(response.uri, response.filename, response.headers["content-type"])
+            startDownload(response.uri, response.headers["content-disposition"], response.headers["content-type"])
         }
 
         override fun onContextMenu(
@@ -820,13 +820,13 @@ class MainActivity : Activity() {
         if (on) hideSystemBars() else applySystemBars()
     }
 
-    private fun startDownload(url: String, filename: String?, mime: String?) {
+    private fun startDownload(url: String, contentDisposition: String?, mime: String?) {
         if (!(url.startsWith("http://") || url.startsWith("https://"))) {
             toast("This download type isn't supported yet")
             return
         }
         try {
-            val name = if (!filename.isNullOrEmpty()) filename else URLUtil.guessFileName(url, null, mime)
+            val name = URLUtil.guessFileName(url, contentDisposition, mime)
             val req = DownloadManager.Request(Uri.parse(url))
             if (mime != null) req.setMimeType(mime)
             req.setTitle(name)
