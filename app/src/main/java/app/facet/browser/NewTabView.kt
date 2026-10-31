@@ -50,9 +50,10 @@ class NewTabView(
 
         val scroll = ScrollView(ctx)
         scroll.isVerticalScrollBarEnabled = false
+        scroll.overScrollMode = View.OVER_SCROLL_NEVER
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(ctx.dp(20), ctx.dp(28), ctx.dp(20), ctx.dp(36))
+        col.setPadding(ctx.dp(20), ctx.dp(14), ctx.dp(20), ctx.dp(10))
 
         // chips: workspace and command bar
         val chips = LinearLayout(ctx)
@@ -67,14 +68,14 @@ class NewTabView(
         col.addView(chips, LinearLayout.LayoutParams(WRAP, WRAP))
 
         // headline: two lines, the second shimmers
-        val line1 = makeText(ctx, if (isPrivate) "Nothing here will" else "Browse,", 46f, c.ink, Fonts.serif)
+        val line1 = makeText(ctx, if (isPrivate) "Nothing here will" else "Browse,", 42f, c.ink, Fonts.serif)
         line1.setLineSpacing(0f, 1.0f)
         val l1 = LinearLayout.LayoutParams(WRAP, WRAP)
-        l1.topMargin = ctx.dp(26)
+        l1.topMargin = ctx.dp(16)
         col.addView(line1, l1)
         val line2 = ShimmerText(ctx, c.accent, if (c.dark) 0xFFFFD9B8.toInt() else 0xFFE9A07A.toInt())
         line2.text = if (isPrivate) "follow you." else "quietly."
-        line2.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 46f)
+        line2.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 42f)
         line2.typeface = Fonts.serifItalic
         line2.includeFontPadding = false
         col.addView(line2, LinearLayout.LayoutParams(WRAP, WRAP))
@@ -88,7 +89,7 @@ class NewTabView(
         val sub = makeText(ctx, subText, 16f, c.muted, Fonts.sans)
         sub.setLineSpacing(0f, 1.2f)
         val sublp = LinearLayout.LayoutParams(MATCH, WRAP)
-        sublp.topMargin = ctx.dp(14)
+        sublp.topMargin = ctx.dp(10)
         col.addView(sub, sublp)
 
         if (!isPrivate) {
@@ -104,7 +105,7 @@ class NewTabView(
             row.addView(protect, la)
             row.addView(secure, lb)
             val rlp = LinearLayout.LayoutParams(MATCH, WRAP)
-            rlp.topMargin = ctx.dp(28)
+            rlp.topMargin = ctx.dp(18)
             col.addView(row, rlp)
 
             if (reminderCount > 0) {
@@ -174,7 +175,7 @@ class NewTabView(
         val foot = makeTag(ctx, "Facet v$version", c.muted)
         foot.alpha = 0.7f
         val footLp = LinearLayout.LayoutParams(WRAP, WRAP)
-        footLp.topMargin = ctx.dp(28)
+        footLp.topMargin = ctx.dp(12)
         col.addView(foot, footLp)
 
         for (i in 0 until col.childCount) {
@@ -224,7 +225,7 @@ class NewTabView(
         card.addView(IconView(ctx, icon, c.accent, 24), LinearLayout.LayoutParams(ctx.dp(24), ctx.dp(24)))
         val t = makeText(ctx, title, 17f, c.ink, Fonts.sansMedium)
         val tlp = LinearLayout.LayoutParams(WRAP, WRAP)
-        tlp.topMargin = ctx.dp(14)
+        tlp.topMargin = ctx.dp(10)
         card.addView(t, tlp)
         val s = makeText(ctx, sub, 12.5f, c.muted, Fonts.sans)
         val slp = LinearLayout.LayoutParams(WRAP, WRAP)
