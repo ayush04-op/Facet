@@ -67,6 +67,7 @@ class MainActivity : Activity() {
     private var settingsView: SettingsView? = null
 
     private var fullscreen = false
+    private var pendingAndroidPerm: GeckoSession.PermissionDelegate.Callback? = null
     private var pendingActivity: GeckoResult<Intent>? = null
     private var pendingFile: Pair<GeckoSession.PromptDelegate.FilePrompt, GeckoResult<GeckoSession.PromptDelegate.PromptResponse>>? = null
 
@@ -183,6 +184,16 @@ class MainActivity : Activity() {
             return
         }
         moveTaskToBack(true)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_PERM) {
+            val cb = pendingAndroidPerm
+            pendingAndroidPerm = null
+            if (grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) cb?.grant()
+            else cb?.reject()
+        }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -466,6 +477,7 @@ class MainActivity : Activity() {
         s.progressDelegate = d
         s.contentDelegate = d
         s.promptDelegate = d
+        s.permissionDelegate = d
         s.contentBlockingDelegate = d
     }
 
@@ -478,6 +490,18 @@ class MainActivity : Activity() {
         }
         if (!s.isOpen) s.open(runtime)
         return s
+    }
+
+    private fun recover(t: BrowserTab) {
+        val url = t.url
+        geckoView.post {
+            disposeSession(t)
+            if (url.isNotEmpty() && !t.showsNewTab) {
+                ensureSession(t).loadUri(url)
+                toast("The page stopped working and was reloaded")
+            }
+            if (t === current) showCurrent()
+        }
     }
 
     private fun disposeSession(t: BrowserTab) {
@@ -599,6 +623,7 @@ class MainActivity : Activity() {
         GeckoSession.ProgressDelegate,
         GeckoSession.ContentDelegate,
         GeckoSession.PromptDelegate,
+        GeckoSession.PermissionDelegate,
         ContentBlocking.Delegate {
 
         // ----- navigation
@@ -724,6 +749,74 @@ class MainActivity : Activity() {
             if (items.isEmpty()) return
             showSheet(Urls.host(link ?: image ?: ""), items)
         }
+
+        // ----- permissions (asked per request; nothing is granted silently)
+
+        override fun onAndroidPermissionsRequest(
+            session: GeckoSession,
+            permissions: Array<out String>?,
+            callback: GeckoSession.PermissionDelegate.Callback
+        ) {
+            val needed = permissions?.filter {
+                checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            }?.toTypedArray()
+            if (needed == null || needed.isEmpty()) {
+                callback.grant()
+                return
+            }
+            pendingAndroidPerm = callback
+            requestPermissions(needed, REQ_PERM)
+        }
+
+        override fun onContentPermissionRequest(
+            session: GeckoSession,
+            perm: GeckoSession.PermissionDelegate.ContentPermission
+        ): GeckoResult<Int>? {
+            if (perm.permission != GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
+                return GeckoResult.fromValue(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+            }
+            val res = GeckoResult<Int>()
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(Icon.CHECK, "Allow") {
+                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW)
+            })
+            items.add(SheetItem(null, "Block") {
+                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+            })
+            showSheet("${Urls.host(perm.uri ?: "")} wants to know your location", items) {
+                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+            }
+            return res
+        }
+
+        override fun onMediaPermissionRequest(
+            session: GeckoSession,
+            uri: String,
+            video: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+            audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+            callback: GeckoSession.PermissionDelegate.MediaCallback
+        ) {
+            val cam = video?.firstOrNull()
+            val mic = audio?.firstOrNull()
+            if (cam == null && mic == null) {
+                callback.reject()
+                return
+            }
+            val what = when {
+                cam != null && mic != null -> "camera and microphone"
+                cam != null -> "camera"
+                else -> "microphone"
+            }
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(Icon.CHECK, "Allow") { callback.grant(cam, mic) })
+            items.add(SheetItem(null, "Block") { callback.reject() })
+            showSheet("${Urls.host(uri)} wants to use your $what", items) { callback.reject() }
+        }
+
+        // ----- engine crashes: reload the page instead of leaving a blank tab
+
+        override fun onCrash(session: GeckoSession) { recover(tab) }
+        override fun onKill(session: GeckoSession) { recover(tab) }
 
         // ----- tracker stats
 
@@ -1145,5 +1238,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_FILE = 1001
         private const val REQ_GECKO = 1002
+        private const val REQ_PERM = 1003
     }
 }

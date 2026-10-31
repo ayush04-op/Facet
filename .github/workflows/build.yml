@@ -131,6 +131,23 @@ jobs:
           fi
           exit $code
 
+      - name: Smoke test (opens real sites with the built browser)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:FACET_SMOKE = "1"
+          $p = Start-Process -FilePath "publish\Facet.exe" -PassThru
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); Write-Output "::warning title=smoke::Facet did not finish in 5 minutes" }
+          $dir = Join-Path $env:LOCALAPPDATA "Facet"
+          $f = Join-Path $dir "smoke.txt"
+          if (Test-Path $f) {
+            Get-Content $f | ForEach-Object { if ($_.Trim()) { Write-Output "::notice title=smoke::$_" } }
+          } else {
+            Write-Output "::error title=smoke::no report written (exit code $($p.ExitCode))"
+          }
+          $log = Join-Path $dir "cef.log"
+          if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { Write-Output "::notice title=cef-log::$_" } }
+
       - name: Zip it
         shell: pwsh
         run: Compress-Archive -Path publish\* -DestinationPath "Facet-v${{ steps.ver.outputs.name }}-windows-x64.zip"

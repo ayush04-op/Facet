@@ -56,7 +56,11 @@ namespace Facet
             SourceInitialized += (s, e) => ApplyTitleBar();
             SizeChanged += (s, e) => RefreshTabs();
             Closing += (s, e) => SaveState();
-            Loaded += (s, e) => AutoCheckUpdates();
+            Loaded += (s, e) =>
+            {
+                if (Environment.GetEnvironmentVariable("FACET_SMOKE") == "1") RunSmoke();
+                else AutoCheckUpdates();
+            };
         }
 
         // ------------------------------------------------------------ chrome
@@ -543,6 +547,66 @@ namespace Facet
             toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.6) };
             toastTimer.Tick += (s, e) => { toastTimer.Stop(); toastHost.Children.Clear(); };
             toastTimer.Start();
+        }
+
+
+        // ------------------------------------------------------------ self test (used by CI only)
+
+        /// <summary>Loads a few real sites and checks engine features, then writes smoke.txt and exits.</summary>
+        private async void RunSmoke()
+        {
+            var report = new System.Text.StringBuilder();
+            try
+            {
+                await Task.Delay(4000);
+                var tab = current;
+                string lastError = "";
+                tab.Browser.LoadError += (s, e) => { if (e.Frame != null && e.Frame.IsMain) lastError = e.ErrorText + " (" + e.ErrorCode + ")"; };
+                string[] urls =
+                {
+                    "https://example.com", "https://en.wikipedia.org/wiki/Main_Page", "https://github.com", "https://www.google.com",
+                    "https://duckduckgo.com", "https://www.youtube.com", "https://accounts.google.com", "https://webauthn.io", "http://neverssl.com"
+                };
+                foreach (var url in urls)
+                {
+                    var done = new TaskCompletionSource<bool>();
+                    bool seen = false;
+                    lastError = "";
+                    Action h = () => { if (tab.Loading) seen = true; else if (seen) done.TrySetResult(true); };
+                    tab.Changed += h;
+                    tab.Go(url);
+                    await Task.WhenAny(done.Task, Task.Delay(35000));
+                    tab.Changed -= h;
+                    await Task.Delay(1500);
+                    report.AppendLine("SITE " + url + " -> " + (done.Task.IsCompleted ? "loaded" : "TIMEOUT")
+                        + " | title=\"" + tab.Title + "\" | final=" + tab.Url + (lastError.Length > 0 ? " | ERROR " + lastError : ""));
+                }
+
+                // engine features that decide whether sites and passkeys work
+                async Task<string> Eval(string js)
+                {
+                    try
+                    {
+                        var r = await tab.Browser.EvaluateScriptAsPromiseAsync(js);
+                        return r.Success ? Convert.ToString(r.Result) : "script error: " + r.Message;
+                    }
+                    catch (Exception ex) { return "exception: " + ex.Message; }
+                }
+                tab.Go("https://webauthn.io");
+                await Task.Delay(6000);
+                report.AppendLine("FEATURE PublicKeyCredential = " + await Eval("Promise.resolve(typeof PublicKeyCredential)"));
+                report.AppendLine("FEATURE platform authenticator available = " + await Eval("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(v=>String(v)).catch(e=>'error '+e)"));
+                report.AppendLine("FEATURE conditional UI = " + await Eval("(PublicKeyCredential.isConditionalMediationAvailable?PublicKeyCredential.isConditionalMediationAvailable():Promise.resolve(false)).then(v=>String(v)).catch(e=>'error '+e)"));
+                report.AppendLine("FEATURE H.264 video = [" + await Eval("Promise.resolve(document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E\"'))") + "]");
+                report.AppendLine("FEATURE AAC audio = [" + await Eval("Promise.resolve(document.createElement('audio').canPlayType('audio/mp4; codecs=\"mp4a.40.2\"'))") + "]");
+                report.AppendLine("FEATURE VP9 video = [" + await Eval("Promise.resolve(document.createElement('video').canPlayType('video/webm; codecs=\"vp9\"'))") + "]");
+                report.AppendLine("FEATURE Widevine (EME) = " + await Eval("Promise.resolve(typeof navigator.requestMediaKeySystemAccess)"));
+                report.AppendLine("FEATURE WebGL = " + await Eval("Promise.resolve(!!document.createElement('canvas').getContext('webgl'))"));
+                report.AppendLine("STATS trackers blocked = " + Stats.Blocked + ", secure loads = " + Stats.Secure);
+            }
+            catch (Exception ex) { report.AppendLine("SMOKE CRASHED: " + ex); }
+            try { System.IO.File.WriteAllText(System.IO.Path.Combine(AppInfo.DataDir, "smoke.txt"), report.ToString()); } catch { }
+            Application.Current.Shutdown();
         }
 
         // ------------------------------------------------------------ state

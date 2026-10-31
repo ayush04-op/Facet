@@ -43,7 +43,9 @@ namespace Facet
 
                 var s = new CefSettings();
                 s.CachePath = Path.Combine(AppInfo.DataDir, "cef");
-                s.LogSeverity = LogSeverity.Disable;
+                bool smoke = Environment.GetEnvironmentVariable("FACET_SMOKE") == "1";
+                s.LogSeverity = smoke ? LogSeverity.Warning : LogSeverity.Disable;
+                if (smoke) s.LogFile = Path.Combine(AppInfo.DataDir, "cef.log");
                 s.PersistSessionCookies = false;
                 s.CefCommandLineArgs["disable-features"] = "TranslateUI";
                 Cef.Initialize(s, performDependencyCheck: false, browserProcessHandler: null);

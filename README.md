@@ -13,7 +13,8 @@ Mozilla's source tree is copied or forked. GeckoView is licensed under the MPL 2
 - Address bar at the bottom: one field for addresses and searches
 - **Strict tracking protection** (ads, analytics, social trackers, fingerprinters, cryptominers)
 - Third-party cookie isolation and **HTTPS-only mode**
-- Camera, microphone and location denied by default, pop-ups blocked
+- Camera, microphone and location are asked per request and never granted silently; pop-ups blocked
+- Crashed pages reload themselves
 - Bookmarks, downloads, share, desktop site, restore tabs
 - Paper and Paper Dark themes, Prism Serif headings and Prism Sans text throughout
 - Animated interface

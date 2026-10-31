@@ -98,7 +98,10 @@ namespace Facet
         {
             newBrowser = null;
             // Pop-ups that the page opened without a click are dropped.
-            if (userGesture && !string.IsNullOrEmpty(targetUrl)) open(targetUrl);
+            if (!userGesture) return true;
+            // Sign-in windows (window.open) keep their link to the opener, so let the engine create them natively.
+            if (targetDisposition == WindowOpenDisposition.NewPopup || targetDisposition == WindowOpenDisposition.NewWindow) return false;
+            if (!string.IsNullOrEmpty(targetUrl)) open(targetUrl);
             return true;
         }
     }

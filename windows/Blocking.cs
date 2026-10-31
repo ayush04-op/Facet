@@ -80,19 +80,19 @@ namespace Facet
             IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request,
             bool isNavigation, bool isDownload, string requestInitiator, ref bool disableDefaultHandling)
         {
-            return new FacetResourceHandler(prefs, chromiumWebBrowser);
+            return new FacetResourceHandler(prefs);
         }
     }
 
     public class FacetResourceHandler : ResourceRequestHandler
     {
         private readonly Prefs prefs;
-        private readonly IWebBrowser web;
-        public FacetResourceHandler(Prefs prefs, IWebBrowser web) { this.prefs = prefs; this.web = web; }
+        public FacetResourceHandler(Prefs prefs) { this.prefs = prefs; }
 
-        private string TopHost()
+        /// <summary>Host of the page being viewed. Read from the browser, which is safe on engine threads (the WPF Address property is not).</summary>
+        public static string TopHost(IBrowser browser)
         {
-            try { return Urls.Host(web.Address ?? ""); } catch { return ""; }
+            try { return Urls.Host(browser?.MainFrame?.Url ?? ""); } catch { return ""; }
         }
 
         protected override CefReturnValue OnBeforeResourceLoad(
@@ -112,8 +112,8 @@ namespace Facet
 
             if (prefs.BlockTrackers && request.ResourceType != ResourceType.MainFrame && TrackerList.IsTracker(host))
             {
-                string top = TopHost();
-                if (TrackerList.Site(top) != TrackerList.Site(host))
+                string top = TopHost(browser);
+                if (top.Length > 0 && TrackerList.Site(top) != TrackerList.Site(host))
                 {
                     Stats.AddBlocked();
                     return CefReturnValue.Cancel;
@@ -125,30 +125,31 @@ namespace Facet
         protected override ICookieAccessFilter GetCookieAccessFilter(
             IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request)
         {
-            return prefs.BlockThirdPartyCookies ? new ThirdPartyCookieFilter(web) : null;
+            return prefs.BlockThirdPartyCookies ? new ThirdPartyCookieFilter() : null;
         }
     }
 
     public class ThirdPartyCookieFilter : ICookieAccessFilter
     {
-        private readonly IWebBrowser web;
-        public ThirdPartyCookieFilter(IWebBrowser web) { this.web = web; }
-
-        private bool Allowed(IRequest request)
+        // Only cookies from known tracking hosts are refused when they are third-party. Blocking every third-party
+        // cookie breaks sign-in flows, embedded payments and single sign-on on many sites.
+        private bool Allowed(IBrowser browser, IRequest request)
         {
-            string top = Urls.Host(web.Address ?? "");
+            string host = Urls.Host(request.Url);
+            if (!TrackerList.IsTracker(host)) return true;
+            string top = FacetResourceHandler.TopHost(browser);
             if (string.IsNullOrEmpty(top)) return true;
-            return TrackerList.Site(Urls.Host(request.Url)) == TrackerList.Site(top);
+            return TrackerList.Site(host) == TrackerList.Site(top);
         }
 
         public bool CanSendCookie(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request, Cookie cookie)
         {
-            return Allowed(request);
+            return Allowed(browser, request);
         }
 
         public bool CanSaveCookie(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request, IResponse response, Cookie cookie)
         {
-            return Allowed(request);
+            return Allowed(browser, request);
         }
 
         public void Dispose() { }
