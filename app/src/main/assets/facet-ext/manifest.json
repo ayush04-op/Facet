@@ -1,0 +1,15 @@
+{
+  "manifest_version": 2,
+  "name": "Facet",
+  "version": "1.0",
+  "description": "Reader view, highlights and page text for Facet. Built in.",
+  "browser_specific_settings": { "gecko": { "id": "facet@facet.app" } },
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

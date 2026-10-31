@@ -35,13 +35,25 @@ class FacetApp : Application() {
                 if (prefs.httpsUpgrade) GeckoRuntimeSettings.HTTPS_ONLY else GeckoRuntimeSettings.ALLOW_ALL
             )
             val cb = s.contentBlocking
-            cb.setEnhancedTrackingProtectionLevel(
-                if (prefs.blockTrackers) ContentBlocking.EtpLevel.STRICT else ContentBlocking.EtpLevel.NONE
-            )
-            cb.setCookieBehavior(
-                if (prefs.blockThirdPartyCookies) ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
-                else ContentBlocking.CookieBehavior.ACCEPT_ALL
-            )
+            when (prefs.protectionLevel) {
+                0 -> {
+                    cb.setEnhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.DEFAULT)
+                    cb.setCookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
+                }
+                1 -> {
+                    cb.setEnhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.STRICT)
+                    cb.setCookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
+                }
+                else -> {
+                    cb.setEnhancedTrackingProtectionLevel(
+                        if (prefs.blockTrackers) ContentBlocking.EtpLevel.STRICT else ContentBlocking.EtpLevel.NONE
+                    )
+                    cb.setCookieBehavior(
+                        if (prefs.blockThirdPartyCookies) ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
+                        else ContentBlocking.CookieBehavior.ACCEPT_ALL
+                    )
+                }
+            }
             cb.setSafeBrowsing(
                 if (prefs.safeBrowsing) ContentBlocking.SafeBrowsing.DEFAULT else ContentBlocking.SafeBrowsing.NONE
             )

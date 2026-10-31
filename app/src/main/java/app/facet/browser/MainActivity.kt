@@ -28,6 +28,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import org.json.JSONArray
+import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoResult
@@ -71,6 +72,15 @@ class MainActivity : Activity() {
     private var pendingActivity: GeckoResult<Intent>? = null
     private var pendingFile: Pair<GeckoSession.PromptDelegate.FilePrompt, GeckoResult<GeckoSession.PromptDelegate.PromptResponse>>? = null
 
+    private lateinit var workspaces: WorkspaceStore
+    private lateinit var workspace: Workspace
+    private lateinit var sitePerms: SitePermStore
+    private lateinit var history: HistoryStore
+    private lateinit var ai: AiConfig
+    private var crashedLastTime = false
+    private val readerTabs = HashSet<Long>()
+    private val aiPending = HashMap<Long, String>()
+
     private val pendingBlocked = AtomicInteger(0)
     private val pendingSecure = AtomicInteger(0)
 
@@ -80,6 +90,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         Fonts.init(this)
         prefs = Prefs(this)
+        crashedLastTime = prefs.runningFlag
+        workspaces = WorkspaceStore(prefs)
+        sitePerms = SitePermStore(prefs)
+        history = HistoryStore(prefs)
+        ai = AiConfig(prefs)
         version = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0"
         } catch (e: Exception) {
@@ -101,6 +116,17 @@ class MainActivity : Activity() {
         }
         geckoView = GeckoView(this)
 
+        // Temporary workspaces never outlive the run they were made in.
+        for (w in workspaces.all()) {
+            if (w.kind == Workspace.TEMPORARY) wipeWorkspace(w)
+        }
+        workspace = workspaces.current()
+
+        FacetExt.listener = extListener
+        FacetExt.install(runtime) {
+            for (t in tabs) t.session?.let { FacetExt.attach(it, t.id) }
+        }
+
         buildUi()
         if (prefs.restoreTabs) restoreSession()
         handleIntent(intent)
@@ -115,6 +141,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        prefs.runningFlag = true
         current?.session?.setActive(true)
     }
 
@@ -123,6 +150,19 @@ class MainActivity : Activity() {
         current?.session?.setActive(false)
         flushStats()
         saveSession()
+        prefs.runningFlag = false
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.isCtrlPressed) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_K -> { showCommandBar(); return true }
+                KeyEvent.KEYCODE_T -> { newTab(null, false); return true }
+                KeyEvent.KEYCODE_L -> { addressEdit.requestFocus(); return true }
+                KeyEvent.KEYCODE_W -> { current?.let { closeTab(it) }; return true }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -133,6 +173,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         geckoView.releaseSession()
+        FacetExt.listener = null
         for (t in tabs) {
             t.session?.close()
             t.session = null
@@ -322,6 +363,7 @@ class MainActivity : Activity() {
         pill.elevation = dpf(2f)
 
         lockIcon = IconView(this, Icon.SEARCH, c.muted, 18)
+        lockIcon.setOnClickListener { showSiteInfo() }
         pill.addView(lockIcon, LinearLayout.LayoutParams(dp(18), dp(18)))
 
         addressEdit = EditText(this)
@@ -457,10 +499,16 @@ class MainActivity : Activity() {
         current?.session?.setActive(false)
         current = t
         showCurrent()
+        saveSession()
     }
 
     private fun sessionSettings(t: BrowserTab): GeckoSessionSettings {
-        return GeckoSessionSettings.Builder()
+        val b = GeckoSessionSettings.Builder()
+        if (!t.isPrivate) {
+            // Each workspace gets its own cookies and storage; Personal uses the engine's normal storage.
+            workspaces.contextFor(workspace)?.let { b.contextId(it) }
+        }
+        return b
             .usePrivateMode(t.isPrivate)
             .userAgentMode(
                 if (t.desktop) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
@@ -479,6 +527,7 @@ class MainActivity : Activity() {
         s.promptDelegate = d
         s.permissionDelegate = d
         s.contentBlockingDelegate = d
+        FacetExt.attach(s, t.id)
     }
 
     private fun ensureSession(t: BrowserTab): GeckoSession {
@@ -505,6 +554,8 @@ class MainActivity : Activity() {
     }
 
     private fun disposeSession(t: BrowserTab) {
+        FacetExt.forget(t.id)
+        readerTabs.remove(t.id)
         val s = t.session ?: return
         if (geckoView.session === s) geckoView.releaseSession()
         s.close()
@@ -521,9 +572,17 @@ class MainActivity : Activity() {
                 this, c, t.isPrivate,
                 prefs.trackersBlocked + pendingBlocked.get(),
                 prefs.httpsUpgraded + pendingSecure.get(),
-                version, prefs.bookmarks(),
-                { u -> navigate(u) },
-                { b -> confirmRemoveBookmark(b) }
+                version, workspace, prefs.bookmarks(), sitePerms.reminders().size,
+                HomeActions(
+                    { u -> navigate(u) },
+                    { b -> confirmRemoveBookmark(b) },
+                    { host.openWorkspaces() },
+                    { showCommandBar() },
+                    { host.openResearch() },
+                    { host.openDownloads() },
+                    { showOverlay(permissionRemindersPage(host)) },
+                    { newTab(null, true) }
+                )
             )
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
@@ -545,6 +604,7 @@ class MainActivity : Activity() {
         if (idx < 0) return
         tabs.removeAt(idx)
         disposeSession(t)
+        saveSession()
         if (tabs.isEmpty()) {
             current = null
             newTab(null, false)
@@ -687,12 +747,15 @@ class MainActivity : Activity() {
             tab.url = url
             tab.title = ""
             tab.progress = 5
+            tab.blockedHosts.clear()
             if (tab === current) refreshChrome()
         }
 
         override fun onPageStop(session: GeckoSession, success: Boolean) {
             tab.progress = 100
             if (success && tab.secure && !tab.isPrivate) pendingSecure.incrementAndGet()
+            if (success && !tab.isPrivate && !tab.showsNewTab && tab.url.startsWith("http")) history.add(tab.url, tab.title)
+            saveSession()
             if (tab === current) refreshChrome()
         }
 
@@ -772,20 +835,31 @@ class MainActivity : Activity() {
             session: GeckoSession,
             perm: GeckoSession.PermissionDelegate.ContentPermission
         ): GeckoResult<Int>? {
+            val allow = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+            val deny = GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
             if (perm.permission != GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
-                return GeckoResult.fromValue(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+                return GeckoResult.fromValue(deny)
+            }
+            val host = Urls.host(perm.uri ?: "")
+            if (!tab.isPrivate) {
+                val saved = sitePerms.find(host, "location")
+                if (saved != null) {
+                    if (saved.allowed) sitePerms.touch(host, "location")
+                    return GeckoResult.fromValue(if (saved.allowed) allow else deny)
+                }
             }
             val res = GeckoResult<Int>()
             val items = ArrayList<SheetItem>()
             items.add(SheetItem(Icon.CHECK, "Allow") {
-                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW)
+                if (!tab.isPrivate) sitePerms.set(host, "location", true)
+                res.complete(allow)
             })
+            items.add(SheetItem(null, "Allow this time") { res.complete(allow) })
             items.add(SheetItem(null, "Block") {
-                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+                if (!tab.isPrivate) sitePerms.set(host, "location", false)
+                res.complete(deny)
             })
-            showSheet("${Urls.host(perm.uri ?: "")} wants to know your location", items) {
-                res.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
-            }
+            showSheet("$host wants to know your location", items) { res.complete(deny) }
             return res
         }
 
@@ -802,15 +876,38 @@ class MainActivity : Activity() {
                 callback.reject()
                 return
             }
+            val host = Urls.host(uri)
+            val types = ArrayList<String>()
+            if (cam != null) types.add("camera")
+            if (mic != null) types.add("microphone")
+            if (!tab.isPrivate) {
+                val saved = types.map { sitePerms.find(host, it) }
+                if (saved.any { it != null && !it.allowed }) {
+                    callback.reject()
+                    return
+                }
+                if (saved.all { it != null && it.allowed }) {
+                    types.forEach { sitePerms.touch(host, it) }
+                    callback.grant(cam, mic)
+                    return
+                }
+            }
             val what = when {
                 cam != null && mic != null -> "camera and microphone"
                 cam != null -> "camera"
                 else -> "microphone"
             }
             val items = ArrayList<SheetItem>()
-            items.add(SheetItem(Icon.CHECK, "Allow") { callback.grant(cam, mic) })
-            items.add(SheetItem(null, "Block") { callback.reject() })
-            showSheet("${Urls.host(uri)} wants to use your $what", items) { callback.reject() }
+            items.add(SheetItem(Icon.CHECK, "Allow") {
+                if (!tab.isPrivate) types.forEach { sitePerms.set(host, it, true) }
+                callback.grant(cam, mic)
+            })
+            items.add(SheetItem(null, "Allow this time") { callback.grant(cam, mic) })
+            items.add(SheetItem(null, "Block") {
+                if (!tab.isPrivate) types.forEach { sitePerms.set(host, it, false) }
+                callback.reject()
+            })
+            showSheet("$host wants to use your $what", items) { callback.reject() }
         }
 
         // ----- engine crashes: reload the page instead of leaving a blank tab
@@ -821,7 +918,11 @@ class MainActivity : Activity() {
         // ----- tracker stats
 
         override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
-            if (event.isBlocking) pendingBlocked.incrementAndGet()
+            if (event.isBlocking) {
+                pendingBlocked.incrementAndGet()
+                val h = Urls.host(event.uri ?: "")
+                if (h.isNotEmpty()) tab.blockedHosts[h] = (tab.blockedHosts[h] ?: 0) + 1
+            }
         }
 
         // ----- prompts (alerts, confirms, <select> lists, file pickers) shown as Facet sheets
@@ -955,14 +1056,8 @@ class MainActivity : Activity() {
             return
         }
         try {
-            val name = URLUtil.guessFileName(url, contentDisposition, mime)
-            val req = DownloadManager.Request(Uri.parse(url))
-            if (mime != null) req.setMimeType(mime)
-            req.setTitle(name)
-            req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(req)
+            val guess = URLUtil.guessFileName(url, contentDisposition, mime)
+            val name = Downloads.enqueue(this, url, guess, mime, prefs.getBool("dl_wifi_only", false))
             toast("Downloading $name")
         } catch (e: Exception) {
             toast("Couldn't start the download")
@@ -1017,16 +1112,36 @@ class MainActivity : Activity() {
     private fun showTabSwitcher() {
         blurAddress()
         val v = TabSwitcherView(
-            this, c,
+            this, c, workspace.name,
             { tabs }, { current },
+            { prefs.tabListMode },
+            { prefs.tabListMode = if (prefs.tabListMode == 1) 0 else 1 },
             { t -> closeAllOverlays(); selectTab(t) },
             { t -> closeTab(t); refreshChrome() },
+            { t -> groupSheet(t) },
             { closeAllOverlays(); newTab(null, false) },
             { closeAllOverlays(); newTab(null, true) },
+            { host.openWorkspaces() },
             { closeAllOverlays() }
         )
         tabSwitcher = v
         showOverlay(v)
+    }
+
+    private fun groupSheet(t: BrowserTab) {
+        val items = ArrayList<SheetItem>()
+        val names = tabs.mapNotNull { it.group }.distinct()
+        for (n in names) {
+            if (n != t.group) items.add(SheetItem(Icon.FOLDER, "Move to $n") { t.group = n; saveSession(); tabSwitcher?.rebuild(false) })
+        }
+        items.add(SheetItem(Icon.PLUS, "New group") {
+            showInput("Group name", "For example Trip", "", false) { name ->
+                if (name.isNotBlank()) { t.group = name.trim(); saveSession(); tabSwitcher?.rebuild(false) }
+            }
+        })
+        if (t.group != null) items.add(SheetItem(null, "Remove from group") { t.group = null; saveSession(); tabSwitcher?.rebuild(false) })
+        items.add(SheetItem(Icon.TRASH, "Close tab", false, true) { closeTab(t); refreshChrome(); tabSwitcher?.rebuild(false) })
+        showSheet(if (t.title.isNotBlank()) t.title else Urls.host(t.url), items)
     }
 
     private fun showMenu() {
@@ -1037,53 +1152,265 @@ class MainActivity : Activity() {
         val items = ArrayList<SheetItem>()
         items.add(SheetItem(Icon.PLUS, "New tab") { newTab(null, false) })
         items.add(SheetItem(Icon.PRIVATE, "New private tab") { newTab(null, true) })
+        items.add(SheetItem(Icon.COMMAND, "Search tabs, bookmarks and settings") { showCommandBar() })
         if (onPage) {
             val saved = prefs.bookmarks().any { it.url == url }
             items.add(SheetItem(Icon.STAR, if (saved) "Remove bookmark" else "Add bookmark") { toggleBookmark(t) })
+            items.add(SheetItem(Icon.READER, "Reader view", readerTabs.contains(t.id)) { toggleReader(t) })
+            if (!t.isPrivate) {
+                items.add(SheetItem(Icon.PEN, "Highlight selection") { highlightSelection(t) })
+                items.add(SheetItem(Icon.NOTE, "Save to ${if (workspace.kind == Workspace.RESEARCH) workspace.name else "research"}") {
+                    ResearchStore(prefs, workspace.id).savePage(url, t.title)
+                    toast("Saved")
+                })
+                if (ai.ready) {
+                    items.add(SheetItem(Icon.SPARK, "Summarize with AI") { askAi(t, null) })
+                    items.add(SheetItem(Icon.SPARK, "Ask AI about this page") {
+                        showInput("Ask about this page", "Your question", "", false) { q -> if (q.isNotBlank()) askAi(t, q.trim()) }
+                    })
+                }
+            }
             items.add(SheetItem(Icon.SHARE, "Share") { share(url) })
             items.add(SheetItem(Icon.LINK, "Copy link") { copyText(url) })
             items.add(SheetItem(Icon.DESKTOP, "Desktop site", t.desktop) { toggleDesktop(t) })
         }
+        items.add(SheetItem(Icon.FOLDER, "Workspace: ${workspace.name}") { host.openWorkspaces() })
+        items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
         showSheet(null, items)
     }
 
-    private fun showSettings() {
-        val holder = arrayOfNulls<SettingsView>(1)
-        val sv = SettingsView(
-            this, c, prefs, version,
-            { pendingBlocked.get().toLong() },
-            { closeTopOverlay() },
-            { FacetApp.applyPrefs(runtime, prefs) },
-            {
-                val items = ArrayList<SheetItem>()
-                for (e in Urls.engines) {
-                    items.add(SheetItem(null, e.name, e.id == prefs.searchEngine) {
-                        prefs.searchEngine = e.id
-                        holder[0]?.rebuild()
-                    })
+    private fun toggleReader(t: BrowserTab) {
+        val on = !readerTabs.contains(t.id)
+        val m = JSONObject().put("cmd", "reader").put("on", on)
+            .put("size", prefs.getInt("reader_size", 19))
+            .put("width", prefs.getInt("reader_width", 1))
+            .put("theme", prefs.getInt("reader_theme", 0))
+        if (FacetExt.send(t.id, m)) {
+            if (on) readerTabs.add(t.id) else readerTabs.remove(t.id)
+        } else {
+            toast("Reader view isn't ready on this page yet. Try again in a moment.")
+        }
+    }
+
+    private fun highlightSelection(t: BrowserTab) {
+        if (!FacetExt.send(t.id, JSONObject().put("cmd", "highlightSelection"))) toast("Highlighting isn't ready on this page yet")
+    }
+
+    private fun askAi(t: BrowserTab, question: String?) {
+        aiPending[t.id] = question ?: ""
+        if (!FacetExt.send(t.id, JSONObject().put("cmd", "extractText"))) {
+            aiPending.remove(t.id)
+            toast("The page isn't ready yet. Try again in a moment.")
+        }
+    }
+
+    private val extListener = object : FacetExt.Listener {
+        private fun tabFor(id: Long) = tabs.firstOrNull { it.id == id }
+
+        override fun onHello(tabId: Long, url: String, title: String) {
+            runOnUiThread {
+                val t = tabFor(tabId) ?: return@runOnUiThread
+                if (t.isPrivate) return@runOnUiThread
+                val list = ResearchStore(prefs, workspace.id).highlightsFor(url)
+                if (list.isNotEmpty()) {
+                    FacetExt.send(tabId, JSONObject().put("cmd", "highlights").put("list", JSONArray(list)))
                 }
-                showSheet("Search engine", items)
-            },
-            {
-                val items = ArrayList<SheetItem>()
-                items.add(SheetItem(null, "Match system", prefs.theme == 0) { applyThemeMode(0) })
-                items.add(SheetItem(null, "Paper (light)", prefs.theme == 1) { applyThemeMode(1) })
-                items.add(SheetItem(null, "Paper Dark", prefs.theme == 2) { applyThemeMode(2) })
-                showSheet("Theme", items)
-            },
-            {
-                val items = ArrayList<SheetItem>()
-                items.add(SheetItem(Icon.TRASH, "Clear cookies, cache and site data", false, true) {
-                    clearBrowsingData()
-                    holder[0]?.rebuild()
-                })
-                items.add(SheetItem(null, "Cancel") { })
-                showSheet("Clear browsing data?", items)
-            },
-            { showUpdates() }
-        )
-        holder[0] = sv
+            }
+        }
+
+        override fun onHighlight(tabId: Long, url: String, title: String, text: String) {
+            runOnUiThread {
+                val t = tabFor(tabId) ?: return@runOnUiThread
+                if (t.isPrivate || text.isBlank()) return@runOnUiThread
+                ResearchStore(prefs, workspace.id).addHighlight(url, title, text)
+                toast("Highlight saved")
+            }
+        }
+
+        override fun onText(tabId: Long, url: String, title: String, text: String) {
+            runOnUiThread {
+                val q = aiPending.remove(tabId) ?: return@runOnUiThread
+                val t = tabFor(tabId)
+                if (t == null || t.isPrivate || !ai.ready) return@runOnUiThread
+                val view = AiAnswerView(this@MainActivity, c, if (q.isEmpty()) "Summary" else "Answer", { copyText(it) }, { closeTopOverlay() })
+                showOverlay(view)
+                val system = "You help a person read a web page. Answer only from the page text you are given. Be concise and plain."
+                val user = if (q.isEmpty()) "Summarize this page in a few short paragraphs or bullet points.\n\nTitle: $title\n\n$text"
+                else "Question: $q\n\nTitle: $title\n\n$text"
+                Thread {
+                    val out = try { ai.ask(system, user) } catch (e: Exception) { "Couldn't get an answer: ${e.message}" }
+                    runOnUiThread { view.show(out) }
+                }.start()
+            }
+        }
+
+        override fun onReaderSettings(size: Int, width: Int, theme: Int) {
+            prefs.putInt("reader_size", size)
+            prefs.putInt("reader_width", width)
+            prefs.putInt("reader_theme", theme)
+        }
+
+        override fun onToast(text: String) { runOnUiThread { toast(text) } }
+
+        override fun onReaderClosed(tabId: Long) { runOnUiThread { readerTabs.remove(tabId) } }
+    }
+
+    // ---------------------------------------------------------------- command bar
+
+    private fun showCommandBar() {
+        blurAddress()
+        val v = CommandBarView(this, c, { buildCommands() }, { q ->
+            val out = ArrayList<Command>()
+            if (q.isNotEmpty()) {
+                val looksLikeUrl = !q.contains(" ") && q.contains(".")
+                if (looksLikeUrl) out.add(Command("Go", "Open $q", "", Icon.GLOBE) { navigate(q) })
+                out.add(Command("Search", "Search the web for \"$q\"", "", Icon.SEARCH) { navigate(q) })
+            }
+            out
+        }, { closeTopOverlay() })
+        showOverlay(v)
+    }
+
+    private fun buildCommands(): List<Command> {
+        val out = ArrayList<Command>()
+        for (t in tabs) {
+            val label = if (t.title.isNotBlank()) t.title else if (t.showsNewTab) "New tab" else Urls.host(t.url)
+            out.add(Command("Tab", label, if (t.showsNewTab) "" else Urls.host(t.url), if (t.isPrivate) Icon.PRIVATE else Icon.TABS) { selectTab(t) })
+        }
+        out.add(Command("Command", "New tab", "", Icon.PLUS) { newTab(null, false) })
+        out.add(Command("Command", "New private tab", "", Icon.PRIVATE) { newTab(null, true) })
+        out.add(Command("Command", "Reader view", "Toggle on this page", Icon.READER) { current?.let { if (!it.showsNewTab) toggleReader(it) } })
+        out.add(Command("Command", "Downloads", "", Icon.DOWNLOAD) { host.openDownloads() })
+        out.add(Command("Command", "Workspaces", workspace.name, Icon.FOLDER) { host.openWorkspaces() })
+        out.add(Command("Command", "Research", "Notes and highlights", Icon.NOTE) { host.openResearch() })
+        out.add(Command("Command", "Clear browsing data", "", Icon.TRASH) { host.clearData() })
+        out.add(Command("Setting", "Settings", "", Icon.SETTINGS) { showSettings() })
+        out.add(Command("Setting", "Privacy and security", "Trackers, cookies, HTTPS", Icon.SHIELD) { showOverlay(privacyPage(host)) })
+        out.add(Command("Setting", "Site permissions", "Camera, microphone, location", Icon.LOCK) { host.openSitePermissions() })
+        out.add(Command("Setting", "Tabs and groups", "", Icon.TABS) { showOverlay(tabsPage(host)) })
+        out.add(Command("Setting", "Search engine", "", Icon.SEARCH) { showOverlay(enginePage(host)) })
+        out.add(Command("Setting", "Appearance", "Theme", Icon.PHONE) { showOverlay(appearancePage(host)) })
+        out.add(Command("Setting", "AI assistant", "Optional", Icon.SPARK) { host.openAiSettings() })
+        out.add(Command("Setting", "Software update", "", Icon.REFRESH) { host.openUpdates() })
+        for (b in prefs.bookmarks()) out.add(Command("Bookmark", if (b.title.isNotBlank()) b.title else Urls.host(b.url), Urls.host(b.url), Icon.STAR) { navigate(b.url) })
+        if (!current!!.isPrivate) {
+            for (e in history.all().take(200)) out.add(Command("History", if (e.title.isNotBlank()) e.title else Urls.host(e.url), Urls.host(e.url), Icon.GLOBE) { navigate(e.url) })
+        }
+        return out
+    }
+
+    private fun showSiteInfo() {
+        val t = current ?: return
+        if (t.showsNewTab) return
+        blurAddress()
+        showOverlay(siteInfoPage(host, Urls.host(t.url), t.secure || t.url.startsWith("https://"), t.blockedHosts))
+    }
+
+    // ---------------------------------------------------------------- settings host + workspaces
+
+    private val host = object : SettingsHost {
+        override val context: Context get() = this@MainActivity
+        override val prefs: Prefs get() = this@MainActivity.prefs
+        override val colors: Colors get() = c
+        override val version: String get() = this@MainActivity.version
+        override fun push(v: View) = showOverlay(v)
+        override fun back() = closeTopOverlay()
+        override fun toast(msg: String) = this@MainActivity.toast(msg)
+        override fun sheet(title: String?, items: List<SheetItem>, onCancel: (() -> Unit)?) = showSheet(title, items, onCancel)
+        override fun input(title: String, hint: String, initial: String, secret: Boolean, save: (String) -> Unit) =
+            showInput(title, hint, initial, secret, save)
+        override fun applyEngineSettings() { FacetApp.applyPrefs(runtime, prefs) }
+        override fun applyTheme(mode: Int) = applyThemeMode(mode)
+        override fun clearData() {
+            val items = ArrayList<SheetItem>()
+            items.add(SheetItem(Icon.TRASH, "Clear cookies, cache and site data", false, true) { clearBrowsingData() })
+            items.add(SheetItem(null, "Cancel") { })
+            showSheet("Clear browsing data?", items)
+        }
+        override fun blockedCount(): Long = pendingBlocked.get().toLong()
+        override fun openUpdates() = showUpdates()
+        override fun openDownloads() {
+            showOverlay(DownloadsView(this@MainActivity, c, prefs, { this@MainActivity.toast(it) }, { closeTopOverlay() }))
+        }
+        override fun openWorkspaces() { showOverlay(workspacesPage(this)) }
+        override fun openSitePermissions() { showOverlay(sitePermissionsPage(this)) }
+        override fun openResearch() {
+            val store = ResearchStore(prefs, workspace.id)
+            showOverlay(ResearchView(
+                this@MainActivity, c, workspace.name, store,
+                current?.let { !it.showsNewTab && !it.isPrivate } ?: false,
+                { current?.let { store.savePage(it.url, it.title); this@MainActivity.toast("Saved") } },
+                { u -> closeAllOverlays(); newTab(u, false) },
+                { md -> share(md) },
+                { closeTopOverlay() }
+            ))
+        }
+        override fun openAiSettings() { showOverlay(aiPage(this)) }
+        override fun switchWorkspace(id: String) = this@MainActivity.switchWorkspace(id)
+        override fun createWorkspace(kind: Int) {
+            if (kind == Workspace.TEMPORARY) {
+                val w = workspaces.add("Temporary", kind)
+                this@MainActivity.switchWorkspace(w.id)
+            } else {
+                showInput("Name", if (kind == Workspace.RESEARCH) "Topic, for example Solar panels" else "For example Work", "", false) { name ->
+                    val w = workspaces.add(name, kind)
+                    this@MainActivity.switchWorkspace(w.id)
+                }
+            }
+        }
+        override fun deleteWorkspace(id: String) {
+            val w = workspaces.all().firstOrNull { it.id == id } ?: return
+            if (id == prefs.workspaceId) this@MainActivity.switchWorkspace("personal", keepLeaving = true)
+            wipeWorkspace(w)
+            this@MainActivity.toast("Deleted ${w.name}")
+            closeTopOverlay()
+            showOverlay(workspacesPage(this))
+        }
+        override fun renameWorkspace(id: String) {
+            val w = workspaces.all().firstOrNull { it.id == id } ?: return
+            showInput("Rename", "Name", w.name, false) { name ->
+                workspaces.rename(id, name)
+                workspace = workspaces.current()
+                closeTopOverlay()
+                showOverlay(workspacesPage(this))
+            }
+        }
+        override fun openBlockedReport() {
+            val t = current ?: return
+            showOverlay(blockedReportPage(this, Urls.host(t.url), t.blockedHosts))
+        }
+        override fun reopen(page: () -> View) { closeTopOverlay(); showOverlay(page()) }
+    }
+
+    /** Removes a workspace and everything the engine stored for it. */
+    private fun wipeWorkspace(w: Workspace) {
+        workspaces.contextFor(w)?.let {
+            try { runtime.storageController.clearDataForSessionContext(it) } catch (e: Exception) { }
+        }
+        workspaces.remove(w.id)
+        if (prefs.workspaceId == w.id) prefs.workspaceId = "personal"
+    }
+
+    private fun switchWorkspace(id: String, keepLeaving: Boolean = false) {
+        if (id == prefs.workspaceId) { closeAllOverlays(); return }
+        saveSession()
+        val leaving = workspace
+        for (t in tabs.filter { !it.isPrivate }) disposeSession(t)
+        tabs.removeAll { !it.isPrivate }
+        current = null
+        if (leaving.kind == Workspace.TEMPORARY && !keepLeaving) wipeWorkspace(leaving)
+        prefs.workspaceId = id
+        workspace = workspaces.current()
+        closeAllOverlays()
+        restoreSession()
+        if (tabs.none { !it.isPrivate }) newTab(null, false)
+        if (current == null) selectTab(tabs.last()) else showCurrent()
+        toast("Workspace: ${workspace.name}")
+    }
+
+    private fun showSettings() {
+        val sv = SettingsView(this, host)
         settingsView = sv
         showOverlay(sv)
     }
@@ -1091,7 +1418,7 @@ class MainActivity : Activity() {
     private fun showUpdates() {
         val uv = UpdatesView(
             this, c, prefs, version,
-            { closeTopOverlay(); settingsView?.rebuild() },
+            { closeTopOverlay(); settingsView?.refresh() },
             { title, hint, initial, secret, save -> showInput(title, hint, initial, secret, save) }
         )
         showOverlay(uv)
@@ -1211,7 +1538,10 @@ class MainActivity : Activity() {
         for (t in tabs) {
             if (t.isPrivate) continue
             if (t === current) selected = arr.length()
-            arr.put(if (t.showsNewTab) "" else urlOf(t))
+            val o = JSONObject()
+            o.put("u", if (t.showsNewTab) "" else urlOf(t))
+            t.group?.let { o.put("g", it) }
+            arr.put(o)
         }
         prefs.sessionUrls = arr.toString()
         prefs.sessionSelected = selected
@@ -1224,12 +1554,25 @@ class MainActivity : Activity() {
             val sel = prefs.sessionSelected
             var toSelect: BrowserTab? = null
             for (i in 0 until arr.length()) {
-                val u = arr.optString(i, "")
+                val item = arr.opt(i)
+                val u: String
+                var g: String? = null
+                if (item is JSONObject) {
+                    u = item.optString("u", "")
+                    g = item.optString("g", "").ifEmpty { null }
+                } else {
+                    u = arr.optString(i, "")
+                }
                 val t = newTab(if (u.isEmpty()) null else u, false, false)
+                t.group = g
                 if (i == sel) toSelect = t
             }
             val pick = toSelect ?: tabs.lastOrNull()
             if (pick != null) selectTab(pick)
+            if (crashedLastTime) {
+                crashedLastTime = false
+                toast("Facet stopped unexpectedly. Your tabs are back.")
+            }
         } catch (e: Exception) {
             // bad session data: start fresh
         }

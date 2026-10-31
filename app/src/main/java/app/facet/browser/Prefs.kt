@@ -10,6 +10,34 @@ class Bookmark(val title: String, val url: String)
 class Prefs(context: Context) {
     private val sp: SharedPreferences = context.getSharedPreferences("facet", Context.MODE_PRIVATE)
 
+    fun getStr(key: String, def: String = ""): String = sp.getString(key, def) ?: def
+    fun putStr(key: String, v: String) { sp.edit().putString(key, v).apply() }
+    fun getBool(key: String, def: Boolean): Boolean = sp.getBoolean(key, def)
+    fun putBool(key: String, v: Boolean) { sp.edit().putBoolean(key, v).apply() }
+    fun getLong(key: String, def: Long): Long = sp.getLong(key, def)
+    fun putLong(key: String, v: Long) { sp.edit().putLong(key, v).apply() }
+    fun getInt(key: String, def: Int): Int = sp.getInt(key, def)
+    fun putInt(key: String, v: Int) { sp.edit().putInt(key, v).apply() }
+    fun remove(key: String) { sp.edit().remove(key).apply() }
+
+    /** Id of the workspace whose tabs, bookmarks and notes are active. "personal" always exists. */
+    var workspaceId: String
+        get() = sp.getString("workspace", "personal") ?: "personal"
+        set(v) { sp.edit().putString("workspace", v).apply() }
+
+    /** The personal workspace keeps the original storage keys, so nothing is lost when upgrading. */
+    private fun wsKey(base: String): String = if (workspaceId == "personal") base else base + "_" + workspaceId
+
+    /** 0 = grid, 1 = vertical list */
+    var tabListMode: Int
+        get() = sp.getInt("tab_list_mode", 0)
+        set(v) { sp.edit().putInt("tab_list_mode", v).apply() }
+
+    /** 0 = standard, 1 = strict, 2 = custom (the individual switches decide) */
+    var protectionLevel: Int
+        get() = sp.getInt("protection_level", 1)
+        set(v) { sp.edit().putInt("protection_level", v).apply() }
+
     var blockTrackers: Boolean
         get() = sp.getBoolean("block_trackers", true)
         set(v) { sp.edit().putBoolean("block_trackers", v).apply() }
@@ -74,17 +102,22 @@ class Prefs(context: Context) {
         set(v) { sp.edit().putString("available_update", v).apply() }
 
     var sessionUrls: String
-        get() = sp.getString("session_urls", "[]") ?: "[]"
-        set(v) { sp.edit().putString("session_urls", v).apply() }
+        get() = sp.getString(wsKey("session_urls"), "[]") ?: "[]"
+        set(v) { sp.edit().putString(wsKey("session_urls"), v).apply() }
 
     var sessionSelected: Int
-        get() = sp.getInt("session_selected", 0)
-        set(v) { sp.edit().putInt("session_selected", v).apply() }
+        get() = sp.getInt(wsKey("session_selected"), 0)
+        set(v) { sp.edit().putInt(wsKey("session_selected"), v).apply() }
+
+    /** Set while Facet is running normally; still true at the next launch means the last run ended abnormally. */
+    var runningFlag: Boolean
+        get() = sp.getBoolean("running", false)
+        set(v) { sp.edit().putBoolean("running", v).commit() }
 
     fun bookmarks(): MutableList<Bookmark> {
         val out = ArrayList<Bookmark>()
         try {
-            val a = JSONArray(sp.getString("bookmarks", "[]"))
+            val a = JSONArray(sp.getString(wsKey("bookmarks"), "[]"))
             for (i in 0 until a.length()) {
                 val o = a.getJSONObject(i)
                 out.add(Bookmark(o.optString("t"), o.optString("u")))
@@ -100,6 +133,6 @@ class Prefs(context: Context) {
         for (b in list) {
             a.put(JSONObject().put("t", b.title).put("u", b.url))
         }
-        sp.edit().putString("bookmarks", a.toString()).apply()
+        sp.edit().putString(wsKey("bookmarks"), a.toString()).apply()
     }
 }

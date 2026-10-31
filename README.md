@@ -22,6 +22,20 @@ Mozilla's source tree is copied or forked. GeckoView is licensed under the MPL 2
 
 Coming next: built-in extension support (WebExtensions) and an encrypted password vault.
 
+## Next (in development, Android)
+
+- **Workspaces**: separate Personal, Work and Research spaces, each with its own tabs, bookmarks, cookies and logins
+- **Temporary sessions** that wipe their data when you leave them
+- **Research workspace**: a topic's saved pages, notes and highlights, kept on the device and exportable as Markdown
+- **Tab groups** and a vertical list view in the tab switcher
+- **Reader view** with adjustable text size, width and theme
+- **Command bar** (Ctrl+K): search tabs, bookmarks, history and settings
+- **Site permissions**: review and revoke camera, microphone and location per site, with reminders for long-held access
+- **Tracker controls**: see what was blocked on a page, choose Standard, Strict or Custom
+- **Downloads** section with categories, add-by-link and Wi-Fi-only
+- **Optional AI assistant**: off by default, uses your own key, never runs in private tabs
+- Session restore after a crash, and a redesigned animated home page
+
 ## Building
 
 GitHub Actions builds the APK on every push (`.github/workflows/build.yml`). Download it from

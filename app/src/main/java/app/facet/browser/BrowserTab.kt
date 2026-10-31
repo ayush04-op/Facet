@@ -19,6 +19,12 @@ class BrowserTab(val id: Long, val isPrivate: Boolean) {
     /** URL to load the first time this tab's session is opened (restored sessions). */
     var pendingUrl: String? = null
 
+    /** Name of the tab group this tab belongs to, or null. Groups live inside one workspace. */
+    var group: String? = null
+
+    /** Hosts of requests blocked on the current page, with counts. Reset on every navigation. */
+    val blockedHosts = HashMap<String, Int>()
+
     /** Opened by a page (target=_blank): Back closes it once there is no history left. */
     var closeOnBack: Boolean = false
 }

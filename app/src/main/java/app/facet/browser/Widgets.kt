@@ -16,7 +16,7 @@ import android.widget.LinearLayout
 
 enum class Icon {
     BACK, FORWARD, PLUS, CLOSE, MENU, TABS, LOCK, SEARCH, SHIELD, STAR,
-    SETTINGS, SHARE, REFRESH, GLOBE, TRASH, CHECK, DESKTOP, PRIVATE, LINK, DOWNLOAD, INFO, PHONE
+    SETTINGS, SHARE, REFRESH, GLOBE, TRASH, CHECK, DESKTOP, PRIVATE, LINK, DOWNLOAD, INFO, PHONE, LIST, GRID, READER, NOTE, COMMAND, PEN, FOLDER, SPARK
 }
 
 /** All icons are drawn in code on a 24x24 grid, so there are no image resources to go wrong. */
@@ -177,6 +177,38 @@ class IconView(context: Context, icon: Icon, tint: Int, private val sizeDp: Int 
                 canvas.drawCircle(12f, 12f, 8.5f, stroke)
                 line(canvas, 12f, 11f, 12f, 16.5f)
                 canvas.drawCircle(12f, 7.8f, 1f, fill)
+            }
+            Icon.LIST -> {
+                line(canvas, 9f, 7f, 20f, 7f); line(canvas, 9f, 12f, 20f, 12f); line(canvas, 9f, 17f, 20f, 17f)
+                canvas.drawCircle(5f, 7f, 1.1f, fill); canvas.drawCircle(5f, 12f, 1.1f, fill); canvas.drawCircle(5f, 17f, 1.1f, fill)
+            }
+            Icon.GRID -> {
+                canvas.drawRoundRect(RectF(4f, 4f, 10.5f, 10.5f), 1.8f, 1.8f, stroke)
+                canvas.drawRoundRect(RectF(13.5f, 4f, 20f, 10.5f), 1.8f, 1.8f, stroke)
+                canvas.drawRoundRect(RectF(4f, 13.5f, 10.5f, 20f), 1.8f, 1.8f, stroke)
+                canvas.drawRoundRect(RectF(13.5f, 13.5f, 20f, 20f), 1.8f, 1.8f, stroke)
+            }
+            Icon.READER -> {
+                canvas.drawPath(poly(3.5f, 5.5f, 11f, 7f, 11f, 19.5f, 3.5f, 18f, 3.5f, 5.5f), stroke)
+                canvas.drawPath(poly(20.5f, 5.5f, 13f, 7f, 13f, 19.5f, 20.5f, 18f, 20.5f, 5.5f), stroke)
+            }
+            Icon.NOTE -> {
+                canvas.drawRoundRect(RectF(5f, 3.5f, 19f, 20.5f), 2.5f, 2.5f, stroke)
+                line(canvas, 8.5f, 9f, 15.5f, 9f); line(canvas, 8.5f, 13f, 15.5f, 13f); line(canvas, 8.5f, 17f, 12.5f, 17f)
+            }
+            Icon.COMMAND -> {
+                canvas.drawPath(poly(6.5f, 7.5f, 11f, 12f, 6.5f, 16.5f), stroke)
+                line(canvas, 13f, 17f, 18f, 17f)
+            }
+            Icon.PEN -> {
+                canvas.drawPath(poly(5f, 19f, 6f, 14.5f, 16.5f, 4f, 20f, 7.5f, 9.5f, 18f, 5f, 19f), stroke)
+                line(canvas, 14f, 6.5f, 17.5f, 10f)
+            }
+            Icon.FOLDER -> {
+                canvas.drawPath(poly(3f, 6.5f, 9.5f, 6.5f, 11.5f, 8.5f, 21f, 8.5f, 21f, 19f, 3f, 19f, 3f, 6.5f), stroke)
+            }
+            Icon.SPARK -> {
+                canvas.drawPath(poly(12f, 3f, 14f, 10f, 21f, 12f, 14f, 14f, 12f, 21f, 10f, 14f, 3f, 12f, 10f, 10f, 12f, 3f), stroke)
             }
             Icon.PHONE -> {
                 canvas.drawRoundRect(RectF(7f, 3f, 17f, 21f), 2.6f, 2.6f, stroke)
