@@ -583,25 +583,31 @@ namespace Facet
                 }
 
                 // engine features that decide whether sites and passkeys work
-                async Task<string> Eval(string js)
+                async Task<string> Eval(string js, bool promise)
                 {
                     try
                     {
-                        var r = await tab.Browser.EvaluateScriptAsPromiseAsync(js);
-                        return r.Success ? Convert.ToString(r.Result) : "script error: " + r.Message;
+                        var r = promise ? await tab.Browser.EvaluateScriptAsPromiseAsync(js) : await tab.Browser.EvaluateScriptAsync(js);
+                        return r.Success ? "" + (r.Result ?? "(null)") : "script error: " + r.Message;
                     }
                     catch (Exception ex) { return "exception: " + ex.Message; }
                 }
-                tab.Go("https://webauthn.io");
-                await Task.Delay(6000);
-                report.AppendLine("FEATURE PublicKeyCredential = " + await Eval("Promise.resolve(typeof PublicKeyCredential)"));
-                report.AppendLine("FEATURE platform authenticator available = " + await Eval("PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(v=>String(v)).catch(e=>'error '+e)"));
-                report.AppendLine("FEATURE conditional UI = " + await Eval("(PublicKeyCredential.isConditionalMediationAvailable?PublicKeyCredential.isConditionalMediationAvailable():Promise.resolve(false)).then(v=>String(v)).catch(e=>'error '+e)"));
-                report.AppendLine("FEATURE H.264 video = [" + await Eval("Promise.resolve(document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E\"'))") + "]");
-                report.AppendLine("FEATURE AAC audio = [" + await Eval("Promise.resolve(document.createElement('audio').canPlayType('audio/mp4; codecs=\"mp4a.40.2\"'))") + "]");
-                report.AppendLine("FEATURE VP9 video = [" + await Eval("Promise.resolve(document.createElement('video').canPlayType('video/webm; codecs=\"vp9\"'))") + "]");
-                report.AppendLine("FEATURE Widevine (EME) = " + await Eval("Promise.resolve(typeof navigator.requestMediaKeySystemAccess)"));
-                report.AppendLine("FEATURE WebGL = " + await Eval("Promise.resolve(!!document.createElement('canvas').getContext('webgl'))"));
+                var ready = new TaskCompletionSource<bool>();
+                bool seenLoad = false;
+                Action hh = () => { if (tab.Loading) seenLoad = true; else if (seenLoad) ready.TrySetResult(true); };
+                tab.Changed += hh;
+                tab.Go("https://webauthn.io/?again=1");
+                await Task.WhenAny(ready.Task, Task.Delay(35000));
+                tab.Changed -= hh;
+                await Task.Delay(3000);
+                report.AppendLine("FEATURE PublicKeyCredential = " + await Eval("String(typeof PublicKeyCredential)", false));
+                report.AppendLine("FEATURE platform authenticator available = " + await Eval("return PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function(v){return String(v)}).catch(function(e){return 'error '+e})", true));
+                report.AppendLine("FEATURE conditional UI = " + await Eval("return (PublicKeyCredential.isConditionalMediationAvailable?PublicKeyCredential.isConditionalMediationAvailable():Promise.resolve(false)).then(function(v){return String(v)}).catch(function(e){return 'error '+e})", true));
+                report.AppendLine("FEATURE H.264 video = [" + await Eval("document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E\"')", false) + "]");
+                report.AppendLine("FEATURE AAC audio = [" + await Eval("document.createElement('audio').canPlayType('audio/mp4; codecs=\"mp4a.40.2\"')", false) + "]");
+                report.AppendLine("FEATURE VP9 video = [" + await Eval("document.createElement('video').canPlayType('video/webm; codecs=\"vp9\"')", false) + "]");
+                report.AppendLine("FEATURE EME API = " + await Eval("String(typeof navigator.requestMediaKeySystemAccess)", false));
+                report.AppendLine("FEATURE WebGL = " + await Eval("String(!!document.createElement('canvas').getContext('webgl'))", false));
                 report.AppendLine("STATS trackers blocked = " + Stats.Blocked + ", secure loads = " + Stats.Secure);
             }
             catch (Exception ex) { report.AppendLine("SMOKE CRASHED: " + ex); }

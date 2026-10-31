@@ -141,12 +141,16 @@ jobs:
           $dir = Join-Path $env:LOCALAPPDATA "Facet"
           $f = Join-Path $dir "smoke.txt"
           if (Test-Path $f) {
-            Get-Content $f | ForEach-Object { if ($_.Trim()) { Write-Output "::notice title=smoke::$_" } }
+            $lines = Get-Content $f | Where-Object { $_.Trim() }
+            $sites = ($lines | Where-Object { $_ -like 'SITE*' }) -join '%0A'
+            $feat = ($lines | Where-Object { $_ -notlike 'SITE*' }) -join '%0A'
+            Write-Output "::notice title=smoke-sites::$sites"
+            Write-Output "::notice title=smoke-features::$feat"
           } else {
             Write-Output "::error title=smoke::no report written (exit code $($p.ExitCode))"
           }
           $log = Join-Path $dir "cef.log"
-          if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { Write-Output "::notice title=cef-log::$_" } }
+          if (Test-Path $log) { Write-Output ("::notice title=cef-log::" + ((Get-Content $log -Tail 15) -join '%0A')) }
 
       - name: Zip it
         shell: pwsh
