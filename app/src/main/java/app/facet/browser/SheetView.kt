@@ -60,7 +60,7 @@ class SheetView(
         val r = ctx.dpf(24f)
         card.orientation = LinearLayout.VERTICAL
         val bg = GradientDrawable()
-        bg.setColor(c.bg)
+        bg.setColor(withAlpha(c.bg, 0xF2))
         bg.cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
         card.background = bg
         card.isClickable = true
@@ -116,8 +116,8 @@ class SheetView(
         card.post {
             card.translationY = card.height.toFloat()
             card.visibility = View.VISIBLE
-            card.animate().translationY(0f).setDuration(280L)
-                .setInterpolator(DecelerateInterpolator(2f)).start()
+            card.animate().translationY(0f).setDuration(460L)
+                .setInterpolator(SpringInterpolator(0.2f, 0.5f)).start()
             scrim.animate().alpha(1f).setDuration(220L).start()
         }
     }

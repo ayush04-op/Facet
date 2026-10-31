@@ -32,6 +32,9 @@ interface SettingsHost {
     fun openResearch()
     fun openAiSettings()
     fun openExtensions()
+    fun openHome()
+    fun homeChanged()
+    fun pickWallpaper()
     fun openUrl(url: String)
     val extensions: ExtensionManager
     fun switchWorkspace(id: String)

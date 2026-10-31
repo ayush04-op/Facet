@@ -77,6 +77,7 @@ class SettingsView(
             Entry("Workspaces", "${ws.name} · personal, work, research and temporary sessions", "profiles workspace profile temporary session separate") { host.openWorkspaces() },
             Entry("Privacy and security", "Tracker blocking, cookies, HTTPS-only", "tracker cookie https safe browsing javascript strict protection clear data history") { host.push(privacyPage(host)) },
             Entry("Site permissions", if (reminders > 0) "$reminders ${if (reminders == 1) "site has" else "sites have"} had access for a while" else "Camera, microphone, location", "camera microphone location notifications permission revoke reminder") { host.openSitePermissions() },
+            Entry("Home page", "Wallpaper, clock, weather, glass", "home wallpaper clock weather glass blur accent colour customise background greeting") { host.openHome() },
             Entry("Tabs and groups", if (prefs.tabListMode == 1) "Vertical list" else "Grid", "tabs groups vertical list grid restore session crash") { host.push(tabsPage(host)) },
             Entry("Downloads", "Download manager and Wi-Fi only", "download file wifi manager") { host.openDownloads() },
             Entry("Extensions", "${host.extensions.installed.size} installed · Firefox and Chrome extensions", "extensions add-ons addons chrome firefox ublock crx xpi") { host.openExtensions() },

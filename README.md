@@ -35,6 +35,8 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Downloads** section with categories, add-by-link and Wi-Fi-only
 - **Optional AI assistant**: off by default, uses your own key, never runs in private tabs
 - **Extensions**: browse Mozilla's add-ons, add from a file, or try a Chrome Web Store link; popups, options pages and a private-tab switch per extension
+- **Liquid glass** panels, your own **wallpaper**, an optional **clock and weather**, and accent colours, all under Settings, Home page
+- Upgraded animations
 - Session restore after a crash, and a redesigned animated home page
 
 ## Building

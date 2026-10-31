@@ -34,23 +34,39 @@ class NewTabView(
     workspace: Workspace,
     bookmarks: List<Bookmark>,
     reminderCount: Int,
-    private val a: HomeActions
+    private val a: HomeActions,
+    private val cfg: HomeConfig,
+    private val prefs: Prefs,
+    private val look: HomeLook.Look?
 ) : FrameLayout(ctx) {
+
+    private val glass: GlassSource? = look?.glass
 
     init {
         setBackgroundColor(c.bg)
-        val aurora = AuroraView(ctx, c)
-        aurora.alpha = 0f
-        aurora.animate().alpha(1f).setDuration(1200L).start()
-        addView(aurora, LayoutParams(MATCH, MATCH))
-        val grid = GridBackground(ctx, c)
-        grid.alpha = 0f
-        grid.animate().alpha(0.6f).setDuration(900L).start()
-        addView(grid, LayoutParams(MATCH, MATCH))
+        // The background is laid out at full screen height and anchored to the top, so opening the keyboard
+        // (which shrinks this page) never rescales or shifts it.
+        val bgHost = FrameLayout(ctx)
+        val screenH = ctx.resources.displayMetrics.heightPixels
+        if (look != null) bgHost.addView(look.wallpaper, LayoutParams(MATCH, screenH))
+        if (look == null || cfg.aurora) {
+            val aurora = AuroraView(ctx, c)
+            aurora.alpha = 0f
+            aurora.animate().alpha(if (look != null) 0.6f else 1f).setDuration(1200L).start()
+            bgHost.addView(aurora, LayoutParams(MATCH, screenH))
+        }
+        if (look == null) {
+            val grid = GridBackground(ctx, c)
+            grid.alpha = 0f
+            grid.animate().alpha(0.6f).setDuration(900L).start()
+            bgHost.addView(grid, LayoutParams(MATCH, screenH))
+        }
+        addView(bgHost, LayoutParams(MATCH, MATCH))
 
         val scroll = ScrollView(ctx)
         scroll.isVerticalScrollBarEnabled = false
         scroll.overScrollMode = View.OVER_SCROLL_NEVER
+        if (glass != null) scroll.setOnScrollChangeListener { _, _, _, _, _ -> glass.invalidateAll() }
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(ctx.dp(20), ctx.dp(14), ctx.dp(20), ctx.dp(10))
@@ -67,18 +83,25 @@ class NewTabView(
         chips.addView(cmd, clp)
         col.addView(chips, LinearLayout.LayoutParams(WRAP, WRAP))
 
-        // headline: two lines, the second shimmers
-        val line1 = makeText(ctx, if (isPrivate) "Nothing here will" else "Browse,", 42f, c.ink, Fonts.serif)
+        // clock, date and weather
+        if (cfg.clock && !isPrivate) col.addView(clockBlock(ctx), LinearLayout.LayoutParams(MATCH, WRAP).also { it.topMargin = ctx.dp(18) })
+
+        // headline: two lines, the second shimmers (one compact line when the clock is shown)
+        val compact = cfg.clock && !isPrivate
+        val greeting = if (!isPrivate && cfg.name.isNotEmpty()) greetingFor(cfg.name) else null
+        val line1 = makeText(ctx, if (isPrivate) "Nothing here will" else greeting ?: "Browse,", if (compact) 30f else 42f, c.ink, Fonts.serif)
         line1.setLineSpacing(0f, 1.0f)
         val l1 = LinearLayout.LayoutParams(WRAP, WRAP)
-        l1.topMargin = ctx.dp(16)
+        l1.topMargin = ctx.dp(if (compact) 14 else 16)
         col.addView(line1, l1)
-        val line2 = ShimmerText(ctx, c.accent, if (c.dark) 0xFFFFD9B8.toInt() else 0xFFE9A07A.toInt())
-        line2.text = if (isPrivate) "follow you." else "quietly."
-        line2.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 42f)
-        line2.typeface = Fonts.serifItalic
-        line2.includeFontPadding = false
-        col.addView(line2, LinearLayout.LayoutParams(WRAP, WRAP))
+        if (!(compact && greeting != null)) {
+            val line2 = ShimmerText(ctx, c.accent, if (c.dark) 0xFFFFD9B8.toInt() else 0xFFE9A07A.toInt())
+            line2.text = if (isPrivate) "follow you." else "quietly."
+            line2.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (compact) 30f else 42f)
+            line2.typeface = Fonts.serifItalic
+            line2.includeFontPadding = false
+            col.addView(line2, LinearLayout.LayoutParams(WRAP, WRAP))
+        }
 
         val subText = if (isPrivate) "No history is saved for this tab, and its data is wiped when the last private tab closes."
         else when (workspace.kind) {
@@ -106,10 +129,10 @@ class NewTabView(
             row.addView(secure, lb)
             val rlp = LinearLayout.LayoutParams(MATCH, WRAP)
             rlp.topMargin = ctx.dp(18)
-            col.addView(row, rlp)
+            if (cfg.stats) col.addView(row, rlp)
 
             if (reminderCount > 0) {
-                val rem = BentoCard(ctx, c)
+                val rem = BentoCard(ctx, c, glass)
                 rem.addView(makeTag(ctx, "Permission reminder", c.accent))
                 val t = makeText(
                     ctx,
@@ -151,7 +174,7 @@ class NewTabView(
             col.addView(acts, alp)
 
             // bookmarks
-            val bm = BentoCard(ctx, c)
+            val bm = BentoCard(ctx, c, glass)
             bm.addView(makeTag(ctx, "Bookmarks · ${workspace.name}", c.muted))
             if (bookmarks.isEmpty()) {
                 val empty = makeText(ctx, "Bookmark a page from the menu and it will live here.", 15f, c.muted, Fonts.sans)
@@ -169,7 +192,7 @@ class NewTabView(
             }
             val bmlp = LinearLayout.LayoutParams(MATCH, WRAP)
             bmlp.topMargin = ctx.dp(12)
-            col.addView(bm, bmlp)
+            if (cfg.bookmarks) col.addView(bm, bmlp)
         }
 
         val foot = makeTag(ctx, "Facet v$version", c.muted)
@@ -190,6 +213,52 @@ class NewTabView(
         addView(scroll, LayoutParams(MATCH, MATCH))
     }
 
+    private fun greetingFor(name: String): String {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val part = when { hour < 5 -> "Good night"; hour < 12 -> "Good morning"; hour < 17 -> "Good afternoon"; else -> "Good evening" }
+        return "$part, $name"
+    }
+
+    private fun clockBlock(ctx: Context): View {
+        val box = LinearLayout(ctx)
+        box.orientation = LinearLayout.VERTICAL
+        val time = android.widget.TextClock(ctx)
+        when (cfg.hourFormat) {
+            1 -> { time.format12Hour = "h:mm"; time.format24Hour = "h:mm" }
+            2 -> { time.format12Hour = "HH:mm"; time.format24Hour = "HH:mm" }
+            else -> { time.format12Hour = "h:mm"; time.format24Hour = "HH:mm" }
+        }
+        time.setTextColor(c.ink)
+        time.typeface = Fonts.serif
+        time.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 64f)
+        time.includeFontPadding = false
+        box.addView(time, LinearLayout.LayoutParams(WRAP, WRAP))
+        if (cfg.date) {
+            val date = android.widget.TextClock(ctx)
+            date.format12Hour = "EEEE, d MMMM"
+            date.format24Hour = "EEEE, d MMMM"
+            date.setTextColor(c.muted)
+            date.typeface = Fonts.sans
+            date.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+            date.includeFontPadding = false
+            val dlp = LinearLayout.LayoutParams(WRAP, WRAP)
+            dlp.topMargin = ctx.dp(4)
+            box.addView(date, dlp)
+        }
+        if (cfg.weather) {
+            val w = makeText(ctx, "", 15f, c.muted, Fonts.sans)
+            val wlp = LinearLayout.LayoutParams(WRAP, WRAP)
+            wlp.topMargin = ctx.dp(6)
+            box.addView(w, wlp)
+            fun show(i: WeatherInfo?) {
+                w.text = if (i == null) "" else "${i.temp}°${if (i.fahrenheit) "F" else "C"} · ${i.words} · ${i.place}"
+            }
+            show(Weather.cached(prefs))
+            Weather.refresh(prefs, cfg) { show(it) }
+        }
+        return box
+    }
+
     private fun half(left: Boolean): LinearLayout.LayoutParams {
         val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
         if (left) lp.rightMargin = context.dp(6) else lp.leftMargin = context.dp(6)
@@ -202,7 +271,9 @@ class NewTabView(
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(14), ctx.dp(8))
         val fg = if (strong) 0xFFFFFFFF.toInt() else c.ink
-        val bg = if (strong) shape(c.accent, ctx.dpf(22f)) else shape(withAlpha(c.surface, 0xE6), ctx.dpf(22f), c.line, ctx.dp(1))
+        val bg: android.graphics.drawable.Drawable = if (strong) shape(c.accent, ctx.dpf(22f))
+        else if (glass != null) GlassDrawable(glass, row, ctx.dpf(22f), ctx.resources.displayMetrics.density)
+        else shape(withAlpha(c.surface, 0xE6), ctx.dpf(22f), c.line, ctx.dp(1))
         row.pressable(bg, withAlpha(fg, 0x33), ctx.dpf(22f))
         row.addView(IconView(ctx, icon, fg, 17), LinearLayout.LayoutParams(ctx.dp(17), ctx.dp(17)))
         val t = makeText(ctx, label, 14f, fg, Fonts.sansMedium)
@@ -218,7 +289,7 @@ class NewTabView(
     }
 
     private fun action(ctx: Context, icon: Icon, title: String, sub: String, onClick: () -> Unit): View {
-        val card = BentoCard(ctx, c)
+        val card = BentoCard(ctx, c, glass)
         card.pressable(card.background, withAlpha(c.ink, 0x14), ctx.dpf(18f))
         card.setOnClickListener { onClick() }
         card.pressScale(0.96f)
@@ -235,7 +306,7 @@ class NewTabView(
     }
 
     private fun statCard(ctx: Context, label: String, value: Long, caption: String, pulse: Boolean): BentoCard {
-        val card = BentoCard(ctx, c)
+        val card = BentoCard(ctx, c, glass)
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL

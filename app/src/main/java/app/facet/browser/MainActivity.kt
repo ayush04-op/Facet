@@ -16,6 +16,12 @@ import android.os.Environment
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.window.BackEvent
+import android.window.OnBackAnimationCallback
+import android.window.OnBackInvokedDispatcher
+import android.animation.ValueAnimator
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
@@ -236,6 +242,46 @@ class MainActivity : Activity() {
         moveTaskToBack(true)
     }
 
+    // ---------------------------------------------------------------- back gesture
+
+    private var backCallback: Any? = null
+
+    /** Registers a back-gesture callback that previews the screen being closed (Android 14+). */
+    private fun syncBackCallback() {
+        if (Build.VERSION.SDK_INT < 34) return
+        if (backCallback == null) {
+            val cb = object : OnBackAnimationCallback {
+                override fun onBackStarted(backEvent: BackEvent) {}
+                override fun onBackProgressed(backEvent: BackEvent) {
+                    val top = overlays.lastOrNull() ?: return
+                    val p = backEvent.progress
+                    val dir = if (backEvent.swipeEdge == BackEvent.EDGE_LEFT) 1f else -1f
+                    top.scaleX = 1f - 0.08f * p
+                    top.scaleY = 1f - 0.08f * p
+                    top.translationX = dir * dpf(18f) * p
+                    top.alpha = 1f - 0.25f * p
+                }
+                override fun onBackCancelled() { resetTop() }
+                override fun onBackInvoked() { resetTop(); onBackPressedCompat() }
+            }
+            backCallback = cb
+        }
+        val cb = backCallback as OnBackAnimationCallback
+        if (overlays.isNotEmpty()) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)
+        } else {
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(cb)
+        }
+    }
+
+    private fun resetTop() {
+        val top = overlays.lastOrNull() ?: return
+        top.animate().scaleX(1f).scaleY(1f).translationX(0f).alpha(1f).setDuration(160L).start()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun onBackPressedCompat() { onBackPressed() }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERM) {
@@ -254,6 +300,20 @@ class MainActivity : Activity() {
             pendingActivity = null
             if (resultCode == RESULT_OK && data != null) pa?.complete(data)
             else pa?.completeExceptionally(RuntimeException("Cancelled"))
+            return
+        }
+        if (requestCode == REQ_WALL) {
+            val u = data?.data
+            if (resultCode == RESULT_OK && u != null) {
+                if (Wallpapers.saveCustom(this, u)) {
+                    val cfg = HomeConfig(prefs)
+                    cfg.wallpaper = 9
+                    cfg.customStamp = System.currentTimeMillis()
+                    HomeLook.forget()
+                    if (current?.showsNewTab == true) showCurrent()
+                    toast("Wallpaper set")
+                } else toast("Couldn't use that picture")
+            }
             return
         }
         if (requestCode == REQ_EXT) {
@@ -296,7 +356,7 @@ class MainActivity : Activity() {
             2 -> true
             else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
-        return if (dark) Palette.dark else Palette.light
+        return Palette.make(dark, HomeConfig(prefs).accent)
     }
 
     @Suppress("DEPRECATION")
@@ -582,6 +642,7 @@ class MainActivity : Activity() {
         geckoView.releaseSession()
         (geckoView.parent as? ViewGroup)?.removeView(geckoView)
         if (t.showsNewTab) {
+            val cfgHome = HomeConfig(prefs)
             val v = NewTabView(
                 this, c, t.isPrivate,
                 prefs.trackersBlocked + pendingBlocked.get(),
@@ -596,7 +657,9 @@ class MainActivity : Activity() {
                     { host.openDownloads() },
                     { showOverlay(permissionRemindersPage(host)) },
                     { newTab(null, true) }
-                )
+                ),
+                cfgHome, prefs,
+                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark)
             )
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
@@ -1081,8 +1144,30 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- overlays
 
+    private var blurAnim: ValueAnimator? = null
+    private var blurNow = 0f
+
+    /** Frosts the home page behind menus and sheets (Android 12+). Web pages are drawn by the engine and stay as they are. */
+    private fun updateBackdrop() {
+        if (Build.VERSION.SDK_INT < 31) return
+        val want = overlays.isNotEmpty() && current?.showsNewTab == true && HomeConfig(prefs).glass
+        val target = if (want) 26f else 0f
+        if (target == blurNow) return
+        blurAnim?.cancel()
+        val a = ValueAnimator.ofFloat(blurNow, target)
+        a.duration = 240L
+        a.addUpdateListener {
+            blurNow = it.animatedValue as Float
+            contentHost.setRenderEffect(if (blurNow < 0.5f) null else RenderEffect.createBlurEffect(blurNow, blurNow, Shader.TileMode.CLAMP))
+        }
+        a.start()
+        blurAnim = a
+    }
+
     private fun showOverlay(v: View) {
         overlays.add(v)
+        updateBackdrop()
+        syncBackCallback()
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         if (v !is SheetView) {
             v.alpha = 0f
@@ -1095,6 +1180,8 @@ class MainActivity : Activity() {
     private fun closeTopOverlay() {
         if (overlays.isEmpty()) return
         val v = overlays.removeAt(overlays.size - 1)
+        updateBackdrop()
+        syncBackCallback()
         if (v === tabSwitcher) tabSwitcher = null
         if (v === settingsView) settingsView = null
         if (v === popupView) { popupView = null; popupGecko?.releaseSession(); popupGecko = null; popupSession?.close(); popupSession = null; extMgr.popupClosed() }
@@ -1195,7 +1282,21 @@ class MainActivity : Activity() {
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
         items.add(SheetItem(Icon.COMMAND, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
-        showSheet(null, items)
+        showMenuPopup(items)
+    }
+
+    private fun showMenuPopup(items: List<SheetItem>) {
+        val holder = arrayOfNulls<MenuPopupView>(1)
+        val v = MenuPopupView(this, c, items, bottomBar.height) {
+            val me = holder[0]
+            if (me != null && overlays.contains(me)) {
+                overlays.remove(me)
+                rootFrame.removeView(me)
+                updateBackdrop()
+            }
+        }
+        holder[0] = v
+        showOverlay(v)
     }
 
     private fun toggleReader(t: BrowserTab) {
@@ -1318,6 +1419,18 @@ class MainActivity : Activity() {
             for (e in history.all().take(200)) out.add(Command("History", if (e.title.isNotBlank()) e.title else Urls.host(e.url), Urls.host(e.url), Icon.GLOBE) { navigate(e.url) })
         }
         return out
+    }
+
+    private fun pickWallpaperImage() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "image/*"
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_WALL)
+        } catch (e: ActivityNotFoundException) {
+            toast("No file picker found")
+        }
     }
 
     private fun pickExtensionFile() {
@@ -1485,6 +1598,9 @@ class MainActivity : Activity() {
         }
         override fun openAiSettings() { showOverlay(aiPage(this)) }
         override fun openExtensions() { showOverlay(extensionsPage(this)) }
+        override fun openHome() { showOverlay(homePage(this)) }
+        override fun homeChanged() { if (current?.showsNewTab == true) showCurrent() }
+        override fun pickWallpaper() { pickWallpaperImage() }
         override fun openUrl(url: String) { closeAllOverlays(); newTab(url, false) }
         override val extensions: ExtensionManager get() = extMgr
         override fun switchWorkspace(id: String) = this@MainActivity.switchWorkspace(id)
@@ -1723,5 +1839,6 @@ class MainActivity : Activity() {
         private const val REQ_GECKO = 1002
         private const val REQ_PERM = 1003
         private const val REQ_EXT = 1004
+        private const val REQ_WALL = 1005
     }
 }

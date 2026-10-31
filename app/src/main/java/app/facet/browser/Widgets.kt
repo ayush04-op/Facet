@@ -366,7 +366,7 @@ class ProgressLine(context: Context, private val c: Colors) : View(context) {
 }
 
 /** A bento card with bounding-box corner ticks. */
-class BentoCard(context: Context, private val c: Colors) : LinearLayout(context) {
+class BentoCard(context: Context, private val c: Colors, private val glass: GlassSource? = null) : LinearLayout(context) {
     private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = c.accent
         style = Paint.Style.STROKE
@@ -376,7 +376,8 @@ class BentoCard(context: Context, private val c: Colors) : LinearLayout(context)
 
     init {
         orientation = LinearLayout.VERTICAL
-        background = shape(c.surface, context.dpf(18f), c.line, context.dp(1))
+        background = if (glass != null) GlassDrawable(glass, this, context.dpf(22f), context.resources.displayMetrics.density)
+        else shape(c.surface, context.dpf(18f), c.line, context.dp(1))
         val p = context.dp(16)
         setPadding(p, p, p, p)
         setWillNotDraw(false)
@@ -384,6 +385,7 @@ class BentoCard(context: Context, private val c: Colors) : LinearLayout(context)
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (glass != null) return
         val i = context.dpf(8f)
         val s = context.dpf(7f)
         val w = width.toFloat()
