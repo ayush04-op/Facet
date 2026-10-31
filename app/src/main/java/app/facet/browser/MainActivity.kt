@@ -77,6 +77,12 @@ class MainActivity : Activity() {
     private lateinit var sitePerms: SitePermStore
     private lateinit var history: HistoryStore
     private lateinit var ai: AiConfig
+    private lateinit var extMgr: ExtensionManager
+    private var popupView: View? = null
+    private var popupGecko: GeckoView? = null
+    private var popupSession: GeckoSession? = null
+    private var promptView: View? = null
+    private var promptCb: ((Boolean) -> Unit)? = null
     private var crashedLastTime = false
     private val readerTabs = HashSet<Long>()
     private val aiPending = HashMap<Long, String>()
@@ -122,6 +128,9 @@ class MainActivity : Activity() {
         }
         workspace = workspaces.current()
 
+        extMgr = ExtensionManager(this, runtime, extHooks)
+        extMgr.pickFile = { pickExtensionFile() }
+        extMgr.start()
         FacetExt.listener = extListener
         FacetExt.install(runtime) {
             for (t in tabs) t.session?.let { FacetExt.attach(it, t.id) }
@@ -245,6 +254,11 @@ class MainActivity : Activity() {
             pendingActivity = null
             if (resultCode == RESULT_OK && data != null) pa?.complete(data)
             else pa?.completeExceptionally(RuntimeException("Cancelled"))
+            return
+        }
+        if (requestCode == REQ_EXT) {
+            val u = data?.data
+            if (resultCode == RESULT_OK && u != null) extMgr.installFromFile(u) { }
             return
         }
         if (requestCode == REQ_FILE) {
@@ -496,7 +510,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectTab(t: BrowserTab) {
-        current?.session?.setActive(false)
+        current?.session?.let { runtime.webExtensionController.setTabActive(it, false); it.setActive(false) }
         current = t
         showCurrent()
         saveSession()
@@ -590,6 +604,7 @@ class MainActivity : Activity() {
             contentHost.addView(geckoView, FrameLayout.LayoutParams(MATCH, MATCH))
             geckoView.setSession(s)
             s.setActive(true)
+            runtime.webExtensionController.setTabActive(s, true)
             val pending = t.pendingUrl
             if (pending != null) {
                 t.pendingUrl = null
@@ -1082,6 +1097,8 @@ class MainActivity : Activity() {
         val v = overlays.removeAt(overlays.size - 1)
         if (v === tabSwitcher) tabSwitcher = null
         if (v === settingsView) settingsView = null
+        if (v === popupView) { popupView = null; popupGecko?.releaseSession(); popupGecko = null; popupSession?.close(); popupSession = null; extMgr.popupClosed() }
+        if (v === promptView) { promptView = null; val cb = promptCb; promptCb = null; cb?.invoke(false) }
         if (v is SheetView) {
             rootFrame.removeView(v)
             v.cancel()
@@ -1176,6 +1193,7 @@ class MainActivity : Activity() {
         }
         items.add(SheetItem(Icon.FOLDER, "Workspace: ${workspace.name}") { host.openWorkspaces() })
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
+        items.add(SheetItem(Icon.COMMAND, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
         showSheet(null, items)
     }
@@ -1282,6 +1300,8 @@ class MainActivity : Activity() {
         out.add(Command("Command", "New private tab", "", Icon.PRIVATE) { newTab(null, true) })
         out.add(Command("Command", "Reader view", "Toggle on this page", Icon.READER) { current?.let { if (!it.showsNewTab) toggleReader(it) } })
         out.add(Command("Command", "Downloads", "", Icon.DOWNLOAD) { host.openDownloads() })
+        out.add(Command("Setting", "Extensions", "Add and manage", Icon.COMMAND) { host.openExtensions() })
+        for (e in extMgr.installed) if (extMgr.actionOf(e) != null) out.add(Command("Command", e.metaData.name ?: e.id, "Extension", Icon.COMMAND) { extMgr.click(e) })
         out.add(Command("Command", "Workspaces", workspace.name, Icon.FOLDER) { host.openWorkspaces() })
         out.add(Command("Command", "Research", "Notes and highlights", Icon.NOTE) { host.openResearch() })
         out.add(Command("Command", "Clear browsing data", "", Icon.TRASH) { host.clearData() })
@@ -1298,6 +1318,123 @@ class MainActivity : Activity() {
             for (e in history.all().take(200)) out.add(Command("History", if (e.title.isNotBlank()) e.title else Urls.host(e.url), Urls.host(e.url), Icon.GLOBE) { navigate(e.url) })
         }
         return out
+    }
+
+    private fun pickExtensionFile() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_EXT)
+        } catch (e: ActivityNotFoundException) {
+            toast("No file picker found")
+        }
+    }
+
+    private fun showExtensionsSheet() {
+        val items = ArrayList<SheetItem>()
+        for (e in extMgr.installed) {
+            if (!e.metaData.enabled || extMgr.actionOf(e) == null) continue
+            items.add(SheetItem(null, e.metaData.name ?: e.id) { extMgr.click(e) })
+        }
+        items.add(SheetItem(Icon.SETTINGS, "Manage extensions") { host.openExtensions() })
+        showSheet("Extensions", items)
+    }
+
+    private val extHooks = ExtHooks(
+        { url, active ->
+            val nt = BrowserTab(nextId++, false)
+            nt.showsNewTab = false
+            nt.closeOnBack = true
+            nt.url = url ?: ""
+            val ns = GeckoSession(sessionSettings(nt))
+            attachDelegates(nt, ns)
+            nt.session = ns
+            tabs.add(nt)
+            if (active) geckoView.post { selectTab(nt) }
+            ns
+        },
+        { u -> closeAllOverlays(); newTab(u, false) },
+        { title, session -> showExtPopup(title, session) },
+        { closeExtPopup() },
+        { title, lines, ok, decide -> showExtPrompt(title, lines, ok, decide) },
+        { msg -> toast(msg) }
+    )
+
+    private fun closeExtPopup() {
+        val v = popupView ?: return
+        overlays.remove(v)
+        popupView = null
+        popupGecko?.releaseSession()
+        popupGecko = null
+        popupSession?.close()
+        popupSession = null
+        rootFrame.removeView(v)
+        extMgr.popupClosed()
+    }
+
+    private fun showExtPopup(title: String, session: GeckoSession) {
+        closeExtPopup()
+        val frame = FrameLayout(this)
+        frame.setBackgroundColor(android.graphics.Color.argb(140, 0, 0, 0))
+        frame.isClickable = true
+        frame.setOnClickListener { closeTopOverlay() }
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.background = shape(c.bg, dpf(24f), c.line, dp(1))
+        card.isClickable = true
+        val head = makeText(this, title, 16f, c.ink, Fonts.sansMedium)
+        head.setPadding(dp(18), dp(14), dp(18), dp(10))
+        card.addView(head, LinearLayout.LayoutParams(MATCH, WRAP))
+        val gv = GeckoView(this)
+        session.contentDelegate = object : GeckoSession.ContentDelegate {
+            override fun onCloseRequest(session: GeckoSession) { closeTopOverlay() }
+        }
+        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
+                closeAllOverlays()
+                newTab(uri, false)
+                return null
+            }
+        }
+        if (!session.isOpen) session.open(runtime)
+        gv.setSession(session)
+        card.addView(gv, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        val lp = FrameLayout.LayoutParams(MATCH, dp(520), Gravity.CENTER)
+        lp.setMargins(dp(14), dp(40), dp(14), dp(40))
+        frame.addView(card, lp)
+        popupView = frame
+        popupGecko = gv
+        popupSession = session
+        showOverlay(frame)
+    }
+
+    private fun showExtPrompt(title: String, lines: List<String>, okLabel: String, decide: (Boolean) -> Unit) {
+        val done = booleanArrayOf(false)
+        val answer: (Boolean) -> Unit = { yes ->
+            if (!done[0]) {
+                done[0] = true
+                promptView = null
+                promptCb = null
+                decide(yes)
+            }
+        }
+        val holder = arrayOfNulls<View>(1)
+        val view = PageView(this, c, title, { closeTopOverlay() }) { b ->
+            b.section("It will be able to")
+            for (l in lines) b.info(l, "")
+            b.section("Decide")
+            b.row(okLabel, "Private tabs stay off limits unless you allow it later") {
+                answer(true)
+                holder[0]?.let { v -> overlays.remove(v); rootFrame.removeView(v) }
+            }
+            b.row("Cancel", null) { closeTopOverlay() }
+        }
+        holder[0] = view
+        promptView = view
+        promptCb = answer
+        showOverlay(view)
     }
 
     private fun showSiteInfo() {
@@ -1347,6 +1484,9 @@ class MainActivity : Activity() {
             ))
         }
         override fun openAiSettings() { showOverlay(aiPage(this)) }
+        override fun openExtensions() { showOverlay(extensionsPage(this)) }
+        override fun openUrl(url: String) { closeAllOverlays(); newTab(url, false) }
+        override val extensions: ExtensionManager get() = extMgr
         override fun switchWorkspace(id: String) = this@MainActivity.switchWorkspace(id)
         override fun createWorkspace(kind: Int) {
             if (kind == Workspace.TEMPORARY) {
@@ -1582,5 +1722,6 @@ class MainActivity : Activity() {
         private const val REQ_FILE = 1001
         private const val REQ_GECKO = 1002
         private const val REQ_PERM = 1003
+        private const val REQ_EXT = 1004
     }
 }

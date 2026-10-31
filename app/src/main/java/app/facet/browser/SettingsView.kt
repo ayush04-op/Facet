@@ -79,6 +79,7 @@ class SettingsView(
             Entry("Site permissions", if (reminders > 0) "$reminders ${if (reminders == 1) "site has" else "sites have"} had access for a while" else "Camera, microphone, location", "camera microphone location notifications permission revoke reminder") { host.openSitePermissions() },
             Entry("Tabs and groups", if (prefs.tabListMode == 1) "Vertical list" else "Grid", "tabs groups vertical list grid restore session crash") { host.push(tabsPage(host)) },
             Entry("Downloads", "Download manager and Wi-Fi only", "download file wifi manager") { host.openDownloads() },
+            Entry("Extensions", "${host.extensions.installed.size} installed · Firefox and Chrome extensions", "extensions add-ons addons chrome firefox ublock crx xpi") { host.openExtensions() },
             Entry("Search engine", Urls.engine(prefs.searchEngine).name, "search engine duckduckgo google brave startpage ecosia") { host.push(enginePage(host)) },
             Entry("Appearance", themeName, "theme dark light paper font appearance") { host.push(appearancePage(host)) },
             Entry("Research", "Notes, saved pages and highlights", "research notes highlights saved pages topic export") { host.openResearch() },

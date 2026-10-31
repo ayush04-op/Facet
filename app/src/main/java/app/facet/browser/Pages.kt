@@ -31,6 +31,9 @@ interface SettingsHost {
     fun openSitePermissions()
     fun openResearch()
     fun openAiSettings()
+    fun openExtensions()
+    fun openUrl(url: String)
+    val extensions: ExtensionManager
     fun switchWorkspace(id: String)
     fun createWorkspace(kind: Int)
     fun deleteWorkspace(id: String)

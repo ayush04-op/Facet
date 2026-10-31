@@ -34,6 +34,7 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Tracker controls**: see what was blocked on a page, choose Standard, Strict or Custom
 - **Downloads** section with categories, add-by-link and Wi-Fi-only
 - **Optional AI assistant**: off by default, uses your own key, never runs in private tabs
+- **Extensions**: browse Mozilla's add-ons, add from a file, or try a Chrome Web Store link; popups, options pages and a private-tab switch per extension
 - Session restore after a crash, and a redesigned animated home page
 
 ## Building
