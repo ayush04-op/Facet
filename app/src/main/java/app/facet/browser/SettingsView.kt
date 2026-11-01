@@ -74,7 +74,7 @@ class SettingsView(
         val themeName = when (prefs.theme) { 1 -> "Paper (light)"; 2 -> "Paper Dark"; else -> "Match system" }
         return listOf(
             Entry("Software update", if (avail.isNotEmpty()) "$avail is available" else "Version ${host.version}", "update upgrade version device status") { host.openUpdates() },
-            Entry("Workspaces", "${ws.name} · personal, work, research and temporary sessions", "profiles workspace profile temporary session separate") { host.openWorkspaces() },
+            Entry("Profiles", "${ws.name} · personal, work, research and temporary", "profiles profile workspace temporary session separate switch") { host.openWorkspaces() },
             Entry("Privacy and security", "Tracker blocking, cookies, HTTPS-only", "tracker cookie https safe browsing javascript strict protection clear data history") { host.push(privacyPage(host)) },
             Entry("Site permissions", if (reminders > 0) "$reminders ${if (reminders == 1) "site has" else "sites have"} had access for a while" else "Camera, microphone, location", "camera microphone location notifications permission revoke reminder") { host.openSitePermissions() },
             Entry("Home page", "Wallpaper, clock, weather, glass", "home wallpaper clock weather glass blur accent colour customise background greeting") { host.openHome() },

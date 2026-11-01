@@ -16,10 +16,10 @@ private fun page(h: SettingsHost, title: String, build: (PageBuilder) -> Unit): 
 
 fun workspacesPage(h: SettingsHost): View {
     lateinit var view: PageView
-    view = page(h, "Workspaces") { b ->
+    view = page(h, "Profiles") { b ->
         val store = WorkspaceStore(h.prefs)
         val cur = store.current()
-        b.section("Your workspaces")
+        b.section("Your profiles")
         for (w in store.all()) {
             val sub = w.label + if (w.id == cur.id) " · open now" else ""
             b.row(w.name, sub) {
@@ -34,10 +34,10 @@ fun workspacesPage(h: SettingsHost): View {
             }
         }
         b.section("Add")
-        b.row("New workspace", "Its own tabs, bookmarks, cookies and logins. For example Work.") { h.createWorkspace(Workspace.NORMAL) }
-        b.row("New research workspace", "Keeps a topic's tabs, notes and page highlights together.") { h.createWorkspace(Workspace.RESEARCH) }
+        b.row("New profile", "Its own tabs, bookmarks, cookies and logins. For example Work.") { h.createWorkspace(Workspace.NORMAL) }
+        b.row("New research profile", "Keeps a topic's tabs, notes and page highlights together.") { h.createWorkspace(Workspace.RESEARCH) }
         b.row("Temporary session", "Clears its tabs, cookies and site data as soon as you leave it.") { h.createWorkspace(Workspace.TEMPORARY) }
-        b.note("Switching workspace saves the tabs you have open and opens the ones from the other workspace. Workspaces never share cookies or logins.")
+        b.note("Switching profile saves the tabs you have open and opens the ones from the other profile. Profiles never share cookies or logins.")
     }
     return view
 }

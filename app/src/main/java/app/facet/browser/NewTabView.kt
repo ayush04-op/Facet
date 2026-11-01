@@ -105,7 +105,7 @@ class NewTabView(
 
         val subText = if (isPrivate) "No history is saved for this tab, and its data is wiped when the last private tab closes."
         else when (workspace.kind) {
-            Workspace.RESEARCH -> "Research workspace. Tabs, notes and highlights for this topic stay together, on this device."
+            Workspace.RESEARCH -> "Research profile. Tabs, notes and highlights for this topic stay together, on this device."
             Workspace.TEMPORARY -> "Temporary session. Everything here is erased when you leave."
             else -> "Fast, private, and free of clutter."
         }

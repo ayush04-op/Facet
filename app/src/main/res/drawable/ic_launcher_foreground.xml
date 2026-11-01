@@ -4,13 +4,31 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- soft glow behind the gem -->
     <path
-        android:fillColor="#E58A5F"
-        android:pathData="M54,26 L78.2,40 L54,54 L29.8,40 Z" />
-    <path
-        android:fillColor="#B5532F"
-        android:pathData="M29.8,40 L54,54 L54,82 L29.8,68 Z" />
-    <path
-        android:fillColor="#8F3E20"
-        android:pathData="M78.2,40 L54,54 L54,82 L78.2,68 Z" />
+        android:pathData="M54,54m-34,0a34,34 0,1 1,68 0a34,34 0,1 1,-68 0">
+        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="34">
+                <item android:offset="0" android:color="#55E58A5F" />
+                <item android:offset="1" android:color="#00E58A5F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- crown -->
+    <path android:fillColor="#F4B08A" android:pathData="M24,44 L40,30 L39,44 Z" />
+    <path android:fillColor="#FFD9B8" android:pathData="M40,30 L54,44 L39,44 Z" />
+    <path android:fillColor="#FFEFDD" android:pathData="M40,30 L68,30 L54,44 Z" />
+    <path android:fillColor="#F0A070" android:pathData="M68,30 L69,44 L54,44 Z" />
+    <path android:fillColor="#D9774A" android:pathData="M68,30 L84,44 L69,44 Z" />
+    <!-- pavilion -->
+    <path android:fillColor="#C8623A" android:pathData="M24,44 L39,44 L54,86 Z" />
+    <path android:fillColor="#E0804F" android:pathData="M39,44 L54,44 L54,86 Z" />
+    <path android:fillColor="#B5532F" android:pathData="M54,44 L69,44 L54,86 Z" />
+    <path android:fillColor="#8F3E20" android:pathData="M69,44 L84,44 L54,86 Z" />
+    <!-- spark -->
+    <path android:fillColor="#FFFFFF" android:pathData="M78,22 L80,28 L86,30 L80,32 L78,38 L76,32 L70,30 L76,28 Z" />
 </vector>

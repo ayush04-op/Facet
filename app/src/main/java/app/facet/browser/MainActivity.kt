@@ -84,6 +84,8 @@ class MainActivity : Activity() {
     private lateinit var history: HistoryStore
     private lateinit var ai: AiConfig
     private lateinit var extMgr: ExtensionManager
+    private var onboardView: OnboardingView? = null
+    private val onboardState by lazy { OnboardState(workspaces.current().name, HomeConfig(prefs).name) }
     private var popupView: View? = null
     private var popupGecko: GeckoView? = null
     private var popupSession: GeckoSession? = null
@@ -146,6 +148,30 @@ class MainActivity : Activity() {
         if (prefs.restoreTabs) restoreSession()
         handleIntent(intent)
         if (tabs.isEmpty()) newTab(null, false)
+        if (!prefs.getBool("onboarded", false)) showOnboarding(0)
+    }
+
+    private fun showOnboarding(step: Int) {
+        val v = OnboardingView(this, c, prefs, onboardState, step, OnboardHooks(
+            { s -> window.decorView.post { rebuildUi(); showOnboarding(s) } },
+            { finishOnboarding() }
+        ))
+        onboardView = v
+        rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    private fun finishOnboarding() {
+        onboardView?.let { rootFrame.removeView(it) }
+        onboardView = null
+        val name = onboardState.profile.ifBlank { "Personal" }
+        workspaces.rename("personal", name)
+        for (x in onboardState.extras) {
+            if (x.equals(name, true) || workspaces.all().any { it.name.equals(x, true) }) continue
+            workspaces.add(x, if (x == "Research") Workspace.RESEARCH else Workspace.NORMAL)
+        }
+        workspace = workspaces.current()
+        prefs.putBool("onboarded", true)
+        showCurrent()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -198,6 +224,10 @@ class MainActivity : Activity() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
+        onboardView?.let {
+            if (!it.handleBack()) moveTaskToBack(true)
+            return
+        }
         if (fullscreen) {
             current?.session?.exitFullScreen()
             return
@@ -1278,7 +1308,7 @@ class MainActivity : Activity() {
             items.add(SheetItem(Icon.LINK, "Copy link") { copyText(url) })
             items.add(SheetItem(Icon.DESKTOP, "Desktop site", t.desktop) { toggleDesktop(t) })
         }
-        items.add(SheetItem(Icon.FOLDER, "Workspace: ${workspace.name}") { host.openWorkspaces() })
+        items.add(SheetItem(Icon.FOLDER, "Profile: ${workspace.name}") { host.openWorkspaces() })
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
         items.add(SheetItem(Icon.COMMAND, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
@@ -1403,7 +1433,7 @@ class MainActivity : Activity() {
         out.add(Command("Command", "Downloads", "", Icon.DOWNLOAD) { host.openDownloads() })
         out.add(Command("Setting", "Extensions", "Add and manage", Icon.COMMAND) { host.openExtensions() })
         for (e in extMgr.installed) if (extMgr.actionOf(e) != null) out.add(Command("Command", e.metaData.name ?: e.id, "Extension", Icon.COMMAND) { extMgr.click(e) })
-        out.add(Command("Command", "Workspaces", workspace.name, Icon.FOLDER) { host.openWorkspaces() })
+        out.add(Command("Command", "Profiles", workspace.name, Icon.FOLDER) { host.openWorkspaces() })
         out.add(Command("Command", "Research", "Notes and highlights", Icon.NOTE) { host.openResearch() })
         out.add(Command("Command", "Clear browsing data", "", Icon.TRASH) { host.clearData() })
         out.add(Command("Setting", "Settings", "", Icon.SETTINGS) { showSettings() })
@@ -1662,7 +1692,7 @@ class MainActivity : Activity() {
         restoreSession()
         if (tabs.none { !it.isPrivate }) newTab(null, false)
         if (current == null) selectTab(tabs.last()) else showCurrent()
-        toast("Workspace: ${workspace.name}")
+        toast("Profile: ${workspace.name}")
     }
 
     private fun showSettings() {

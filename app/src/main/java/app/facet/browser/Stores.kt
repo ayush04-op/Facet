@@ -21,7 +21,7 @@ class Workspace(val id: String, var name: String, val kind: Int) {
     }
 
     val label: String
-        get() = when (kind) { RESEARCH -> "Research"; TEMPORARY -> "Temporary"; else -> "Workspace" }
+        get() = when (kind) { RESEARCH -> "Research"; TEMPORARY -> "Temporary"; else -> "Profile" }
 }
 
 /** Workspaces keep tabs, bookmarks, cookies and site data apart. Everything stays on the device. */
@@ -53,7 +53,7 @@ class WorkspaceStore(private val prefs: Prefs) {
     fun add(name: String, kind: Int): Workspace {
         val list = all()
         val id = "w" + java.lang.Long.toString(System.currentTimeMillis(), 36)
-        val w = Workspace(id, name.ifBlank { "Workspace" }, kind)
+        val w = Workspace(id, name.ifBlank { "Profile" }, kind)
         list.add(w)
         save(list)
         return w
@@ -61,7 +61,7 @@ class WorkspaceStore(private val prefs: Prefs) {
 
     fun rename(id: String, name: String) {
         val list = all()
-        list.firstOrNull { it.id == id }?.name = name.ifBlank { "Workspace" }
+        list.firstOrNull { it.id == id }?.name = name.ifBlank { "Profile" }
         save(list)
     }
 

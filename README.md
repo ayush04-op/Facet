@@ -1,5 +1,7 @@
 # Facet
 
+<p align="center"><img src="docs/logo.png" width="128" alt="Facet logo"></p>
+
 A fast, private, uncluttered browser for Android. The interface is written from scratch in
 Kotlin, and the engine is **GeckoView**, Mozilla's browser engine, bundled inside the app.
 Facet does not use the system WebView and does not depend on any other browser app.
@@ -37,6 +39,8 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Extensions**: browse Mozilla's add-ons, add from a file, or try a Chrome Web Store link; popups, options pages and a private-tab switch per extension
 - **Liquid glass** panels, your own **wallpaper**, an optional **clock and weather**, and accent colours, all under Settings, Home page
 - Upgraded animations
+- **Animated welcome** for first-time users, then quick choices: profile name, search engine, theme, accent and wallpaper
+- **Profiles** (formerly workspaces), plus a refreshed gem logo
 - Session restore after a crash, and a redesigned animated home page
 
 ## Building

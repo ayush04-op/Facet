@@ -58,7 +58,7 @@ fun tabsPage(h: SettingsHost): View {
         b.choice("Vertical list", "Compact rows grouped by tab group, easy to scan with many tabs.", p.tabListMode == 1) { p.tabListMode = 1; view.refresh() }
         b.section("Sessions")
         b.toggle("Restore tabs on launch", "Reopen the tabs you had open, including after a crash. Private tabs are never saved.", p.restoreTabs) { p.restoreTabs = it }
-        b.note("Press and hold a tab in the tab view to put it in a group. Each workspace keeps its own tabs and groups.")
+        b.note("Press and hold a tab in the tab view to put it in a group. Each profile keeps its own tabs and groups.")
     }
     return view
 }
