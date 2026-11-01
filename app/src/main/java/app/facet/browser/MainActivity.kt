@@ -150,6 +150,7 @@ class MainActivity : Activity() {
             res
         }
         GlassTiers.detect(this, prefs.getInt("glass_tier", 0))
+        Ambient.still = GlassTiers.current == GlassTier.LITE
         geckoView = GeckoView(this)
         // Full glass blurs web pages too, which needs the page in a TextureView (a SurfaceView can't be sampled).
         if (GlassTiers.current == GlassTier.FULL) {

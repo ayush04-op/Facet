@@ -13,6 +13,14 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.TextView
 
+/**
+ * Ambient motion switch. On the Lite glass tier the home page holds still, so a screen nobody touches costs no
+ * frames at all (live glass only re-renders when what's behind it actually changes).
+ */
+object Ambient {
+    @Volatile var still = false
+}
+
 /** Soft colour blobs drifting slowly behind the page. Pure drawing, no images. */
 class AuroraView(context: Context, private val c: Colors) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -25,13 +33,21 @@ class AuroraView(context: Context, private val c: Colors) : View(context) {
     )
     private val colors = intArrayOf(c.accent, if (c.dark) 0xFFB8862F.toInt() else 0xFFE0A15B.toInt(), if (c.dark) 0xFF5E7C8C.toInt() else 0xFF8FB3C0.toInt())
 
+    private var lastFrame = 0L
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        if (Ambient.still) return
         val a = ValueAnimator.ofFloat(0f, (Math.PI * 2).toFloat())
         a.duration = 26000L
         a.repeatCount = ValueAnimator.INFINITE
         a.interpolator = LinearInterpolator()
-        a.addUpdateListener { t = it.animatedValue as Float; invalidate() }
+        // the drift is very slow, so 15 redraws a second look the same as 60 and cost a quarter
+        a.addUpdateListener {
+            t = it.animatedValue as Float
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastFrame >= 66L) { lastFrame = now; invalidate() }
+        }
         a.start()
         anim = a
     }
@@ -73,19 +89,30 @@ class ShimmerText(context: Context, private val base: Int, private val glow: Int
         paint.shader = shader
     }
 
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
+    private val again = Runnable { sweep() }
+
+    /** One highlight sweep, then a rest before the next, so the text isn't redrawn all the time. */
+    private fun sweep() {
+        if (!isAttachedToWindow || Ambient.still) return
         val a = ValueAnimator.ofFloat(-1f, 1.6f)
         a.duration = 3600L
-        a.repeatCount = ValueAnimator.INFINITE
-        a.startDelay = 900L
         a.interpolator = LinearInterpolator()
         a.addUpdateListener { shift = it.animatedValue as Float; invalidate() }
+        a.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) { postDelayed(again, 7000L) }
+        })
         a.start()
         anim = a
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        shift = 2f
+        postDelayed(again, 900L)
+    }
+
     override fun onDetachedFromWindow() {
+        removeCallbacks(again)
         anim?.cancel()
         super.onDetachedFromWindow()
     }
