@@ -389,6 +389,11 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun hideSystemBars(hideNav: Boolean) {
+        try { hideSystemBarsUnsafe(hideNav) } catch (e: Exception) { android.util.Log.w("Facet", "hide bars", e) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun hideSystemBarsUnsafe(hideNav: Boolean) {
         if (Build.VERSION.SDK_INT >= 30) {
             val ic = window.insetsController ?: return
             ic.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -404,7 +409,6 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         c = resolveColors()
-        applySystemBars()
 
         rootFrame = FrameLayout(this)
         rootFrame.setBackgroundColor(c.bg)
@@ -423,6 +427,8 @@ class MainActivity : Activity() {
         column.addView(bottomBar, LinearLayout.LayoutParams(MATCH, WRAP))
         rootFrame.addView(column, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(rootFrame)
+        // the window's insets controller only exists once the decor view is installed
+        try { applySystemBars() } catch (e: Exception) { android.util.Log.w("Facet", "system bars", e) }
         contentHost.requestFocus()
     }
 
