@@ -164,21 +164,20 @@ class NewTabView(
                 col.addView(rem, remlp)
             }
 
-            // quick actions
+            // quick actions: four compact tiles in one row
             val acts = LinearLayout(ctx)
-            acts.orientation = LinearLayout.VERTICAL
-            val r1 = LinearLayout(ctx)
-            r1.orientation = LinearLayout.HORIZONTAL
-            r1.addView(action(ctx, Icon.NOTE, "Research", "Notes and highlights") { a.onResearch() }, half(true))
-            r1.addView(action(ctx, Icon.DOWNLOAD, "Downloads", "Every file in one place") { a.onDownloads() }, half(false))
-            acts.addView(r1, LinearLayout.LayoutParams(MATCH, WRAP))
-            val r2 = LinearLayout(ctx)
-            r2.orientation = LinearLayout.HORIZONTAL
-            r2.addView(action(ctx, Icon.PRIVATE, "Private tab", "Leaves no trace") { a.onNewPrivate() }, half(true))
-            r2.addView(action(ctx, Icon.COMMAND, "Command bar", "Tabs, pages, settings") { a.onCommand() }, half(false))
-            val r2lp = LinearLayout.LayoutParams(MATCH, WRAP)
-            r2lp.topMargin = ctx.dp(12)
-            acts.addView(r2, r2lp)
+            acts.orientation = LinearLayout.HORIZONTAL
+            val tiles = listOf(
+                Triple(Icon.NOTE, "Research") { a.onResearch() },
+                Triple(Icon.DOWNLOAD, "Downloads") { a.onDownloads() },
+                Triple(Icon.PRIVATE, "Private tab") { a.onNewPrivate() },
+                Triple(Icon.COMMAND, "Command bar") { a.onCommand() }
+            )
+            for ((i, tile) in tiles.withIndex()) {
+                val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+                if (i > 0) lp.leftMargin = ctx.dp(8)
+                acts.addView(actionTile(ctx, tile.first, tile.second, tile.third), lp)
+            }
             val alp = LinearLayout.LayoutParams(MATCH, WRAP)
             alp.topMargin = ctx.dp(12)
             col.addView(acts, alp)
@@ -298,20 +297,23 @@ class NewTabView(
         return row
     }
 
-    private fun action(ctx: Context, icon: Icon, title: String, sub: String, onClick: () -> Unit): View {
+    /** A small square-ish tile: icon above a short label, sized to sit four in a row. */
+    private fun actionTile(ctx: Context, icon: Icon, title: String, onClick: () -> Unit): View {
         val card = BentoCard(ctx, c)
+        card.setPadding(ctx.dp(6), ctx.dp(14), ctx.dp(6), ctx.dp(12))
+        card.gravity = Gravity.CENTER_HORIZONTAL
         card.pressable(card.background, withAlpha(c.ink, 0x14), ctx.dpf(18f))
         card.setOnClickListener { onClick() }
-        card.pressScale(0.96f)
+        card.pressScale(0.94f)
+        card.contentDescription = title
         card.addView(IconView(ctx, icon, c.accent, 24), LinearLayout.LayoutParams(ctx.dp(24), ctx.dp(24)))
-        val t = makeText(ctx, title, 17f, c.ink, Fonts.sansMedium)
-        val tlp = LinearLayout.LayoutParams(WRAP, WRAP)
-        tlp.topMargin = ctx.dp(10)
+        val t = makeText(ctx, title, 13f, c.ink, Fonts.sansMedium)
+        t.gravity = Gravity.CENTER
+        t.maxLines = 2
+        t.ellipsize = TextUtils.TruncateAt.END
+        val tlp = LinearLayout.LayoutParams(MATCH, WRAP)
+        tlp.topMargin = ctx.dp(8)
         card.addView(t, tlp)
-        val s = makeText(ctx, sub, 12.5f, c.muted, Fonts.sans)
-        val slp = LinearLayout.LayoutParams(WRAP, WRAP)
-        slp.topMargin = ctx.dp(3)
-        card.addView(s, slp)
         return card
     }
 
