@@ -45,25 +45,37 @@ class SpringInterpolator(private val bounce: Float = 0.3f, private val response:
 // ---------------------------------------------------------------- squircle
 
 /** A smooth superellipse (the continuous-corner "squircle" Android 17 pop-ups use), filled and outlined. */
-class SquircleDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val n: Float = 5f) : Drawable() {
+class SquircleDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val radius: Float, private val n: Float = 3.4f) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
 
     override fun onBoundsChange(b: android.graphics.Rect) {
         path.reset()
-        val a = b.width() / 2f
-        val h = b.height() / 2f
-        val cx = b.exactCenterX()
-        val cy = b.exactCenterY()
-        val steps = 96
-        for (i in 0..steps) {
-            val t = (2.0 * Math.PI * i / steps)
-            val c = Math.cos(t)
-            val s = Math.sin(t)
-            val x = cx + a * Math.signum(c).toFloat() * Math.pow(Math.abs(c), 2.0 / n).toFloat()
-            val y = cy + h * Math.signum(s).toFloat() * Math.pow(Math.abs(s), 2.0 / n).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        val r = Math.min(radius, Math.min(w, h) / 2f)
+        val l = b.left.toFloat()
+        val t = b.top.toFloat()
+        val steps = 20
+        // each corner is a quarter of a superellipse, so the curve eases into the straight edges
+        fun corner(cx: Float, cy: Float, which: Int) {
+            for (i in 0..steps) {
+                val a = (Math.PI / 2.0) * i / steps
+                val u = r * Math.pow(Math.cos(a), 2.0 / n).toFloat()
+                val v = r * Math.pow(Math.sin(a), 2.0 / n).toFloat()
+                when (which) {
+                    0 -> path.lineTo(cx + v, cy - u)   // top right: from the top edge round to the right edge
+                    1 -> path.lineTo(cx + u, cy + v)   // bottom right
+                    2 -> path.lineTo(cx - v, cy + u)   // bottom left
+                    else -> path.lineTo(cx - u, cy - v) // top left
+                }
+            }
         }
+        path.moveTo(l + r, t)
+        corner(l + w - r, t + r, 0)
+        corner(l + w - r, t + h - r, 1)
+        corner(l + r, t + h - r, 2)
+        corner(l + r, t + r, 3)
         path.close()
     }
 

@@ -16,11 +16,12 @@ import android.os.Environment
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
+import android.provider.Settings
 import android.graphics.RenderEffect
 import android.graphics.Shader
-import android.window.BackEvent
-import android.window.OnBackAnimationCallback
-import android.window.OnBackInvokedDispatcher
 import android.animation.ValueAnimator
 import android.view.View
 import android.view.ViewGroup
@@ -102,6 +103,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 28) {
+            val wlp = window.attributes
+            wlp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = wlp
+        }
         Fonts.init(this)
         prefs = Prefs(this)
         crashedLastTime = prefs.runningFlag
@@ -272,46 +278,6 @@ class MainActivity : Activity() {
         moveTaskToBack(true)
     }
 
-    // ---------------------------------------------------------------- back gesture
-
-    private var backCallback: Any? = null
-
-    /** Registers a back-gesture callback that previews the screen being closed (Android 14+). */
-    private fun syncBackCallback() {
-        if (Build.VERSION.SDK_INT < 34) return
-        if (backCallback == null) {
-            val cb = object : OnBackAnimationCallback {
-                override fun onBackStarted(backEvent: BackEvent) {}
-                override fun onBackProgressed(backEvent: BackEvent) {
-                    val top = overlays.lastOrNull() ?: return
-                    val p = backEvent.progress
-                    val dir = if (backEvent.swipeEdge == BackEvent.EDGE_LEFT) 1f else -1f
-                    top.scaleX = 1f - 0.08f * p
-                    top.scaleY = 1f - 0.08f * p
-                    top.translationX = dir * dpf(18f) * p
-                    top.alpha = 1f - 0.25f * p
-                }
-                override fun onBackCancelled() { resetTop() }
-                override fun onBackInvoked() { resetTop(); onBackPressedCompat() }
-            }
-            backCallback = cb
-        }
-        val cb = backCallback as OnBackAnimationCallback
-        if (overlays.isNotEmpty()) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb)
-        } else {
-            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(cb)
-        }
-    }
-
-    private fun resetTop() {
-        val top = overlays.lastOrNull() ?: return
-        top.animate().scaleX(1f).scaleY(1f).translationX(0f).alpha(1f).setDuration(160L).start()
-    }
-
-    @Suppress("DEPRECATION")
-    private fun onBackPressedCompat() { onBackPressed() }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERM) {
@@ -390,10 +356,29 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
+    private fun fullUi(): Boolean = prefs.getBool("fullscreen_ui", true)
+
+    private fun gestureNav(): Boolean = try {
+        Settings.Secure.getInt(contentResolver, "navigation_mode", 0) == 2
+    } catch (e: Exception) {
+        false
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        if (fullscreen) hideSystemBars(true) else applySystemBars()
+    }
+
     private fun applySystemBars() {
         window.statusBarColor = c.bg
         window.navigationBarColor = c.bg
         window.setBackgroundDrawable(ColorDrawable(c.bg))
+        if (fullUi()) {
+            hideSystemBars(gestureNav())
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 30) window.insetsController?.show(WindowInsets.Type.systemBars())
         var flags = View.SYSTEM_UI_FLAG_VISIBLE
         if (!c.dark) {
             flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
@@ -403,11 +388,18 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun hideSystemBars() {
-        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    private fun hideSystemBars(hideNav: Boolean) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val ic = window.insetsController ?: return
+            ic.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            var types = WindowInsets.Type.statusBars()
+            if (hideNav) types = types or WindowInsets.Type.navigationBars()
+            ic.hide(types)
+        } else {
+            var f = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            if (hideNav) f = f or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            window.decorView.systemUiVisibility = f
+        }
     }
 
     private fun buildUi() {
@@ -1155,7 +1147,7 @@ class MainActivity : Activity() {
         fullscreen = on
         bottomBar.visibility = if (on) View.GONE else View.VISIBLE
         progressLine.visibility = if (on) View.GONE else View.VISIBLE
-        if (on) hideSystemBars() else applySystemBars()
+        if (on) hideSystemBars(true) else applySystemBars()
     }
 
     private fun startDownload(url: String, contentDisposition: String?, mime: String?) {
@@ -1188,7 +1180,11 @@ class MainActivity : Activity() {
         a.duration = 240L
         a.addUpdateListener {
             blurNow = it.animatedValue as Float
-            contentHost.setRenderEffect(if (blurNow < 0.5f) null else RenderEffect.createBlurEffect(blurNow, blurNow, Shader.TileMode.CLAMP))
+            try {
+                contentHost.setRenderEffect(if (blurNow < 0.5f) null else RenderEffect.createBlurEffect(blurNow, blurNow, Shader.TileMode.CLAMP))
+            } catch (e: Exception) {
+                a.cancel()
+            }
         }
         a.start()
         blurAnim = a
@@ -1197,7 +1193,6 @@ class MainActivity : Activity() {
     private fun showOverlay(v: View) {
         overlays.add(v)
         updateBackdrop()
-        syncBackCallback()
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         if (v !is SheetView) {
             v.alpha = 0f
@@ -1211,7 +1206,6 @@ class MainActivity : Activity() {
         if (overlays.isEmpty()) return
         val v = overlays.removeAt(overlays.size - 1)
         updateBackdrop()
-        syncBackCallback()
         if (v === tabSwitcher) tabSwitcher = null
         if (v === settingsView) settingsView = null
         if (v === popupView) { popupView = null; popupGecko?.releaseSession(); popupGecko = null; popupSession?.close(); popupSession = null; extMgr.popupClosed() }
@@ -1236,6 +1230,7 @@ class MainActivity : Activity() {
             if (me != null && overlays.contains(me)) {
                 overlays.remove(me)
                 rootFrame.removeView(me)
+                updateBackdrop()
             }
         }
         sheet.onCancel = onCancel
@@ -1286,7 +1281,7 @@ class MainActivity : Activity() {
         val items = ArrayList<SheetItem>()
         items.add(SheetItem(Icon.PLUS, "New tab") { newTab(null, false) })
         items.add(SheetItem(Icon.PRIVATE, "New private tab") { newTab(null, true) })
-        items.add(SheetItem(Icon.COMMAND, "Search tabs, bookmarks and settings") { showCommandBar() })
+        items.add(SheetItem(Icon.COMMAND, "Search everything") { showCommandBar() })
         if (onPage) {
             val saved = prefs.bookmarks().any { it.url == url }
             items.add(SheetItem(Icon.STAR, if (saved) "Remove bookmark" else "Add bookmark") { toggleBookmark(t) })
@@ -1310,7 +1305,7 @@ class MainActivity : Activity() {
         }
         items.add(SheetItem(Icon.FOLDER, "Profile: ${workspace.name}") { host.openWorkspaces() })
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
-        items.add(SheetItem(Icon.COMMAND, "Extensions") { showExtensionsSheet() })
+        items.add(SheetItem(Icon.GRID, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
         showMenuPopup(items)
     }
@@ -1628,6 +1623,7 @@ class MainActivity : Activity() {
         }
         override fun openAiSettings() { showOverlay(aiPage(this)) }
         override fun openExtensions() { showOverlay(extensionsPage(this)) }
+        override fun applySystemUi() { applySystemBars() }
         override fun openHome() { showOverlay(homePage(this)) }
         override fun homeChanged() { if (current?.showsNewTab == true) showCurrent() }
         override fun pickWallpaper() { pickWallpaperImage() }
@@ -1717,6 +1713,7 @@ class MainActivity : Activity() {
             if (me != null && overlays.contains(me)) {
                 overlays.remove(me)
                 rootFrame.removeView(me)
+                updateBackdrop()
             }
         }
         holder[0] = v

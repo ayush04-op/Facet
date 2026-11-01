@@ -38,17 +38,18 @@ class MenuPopupView(
         addView(scrim, LayoutParams(MATCH, MATCH))
 
         card.orientation = LinearLayout.VERTICAL
-        card.background = SquircleDrawable(withAlpha(c.bg, 0xEE), withAlpha(c.ink, if (c.dark) 0x26 else 0x1A), ctx.dpf(1f))
+        card.background = SquircleDrawable(withAlpha(c.bg, 0xEE), withAlpha(c.ink, if (c.dark) 0x26 else 0x1A), ctx.dpf(1f), ctx.dpf(30f))
         card.elevation = ctx.dpf(10f)
         card.isClickable = true
-        card.setPadding(ctx.dp(10), ctx.dp(14), ctx.dp(10), ctx.dp(14))
+        card.setPadding(ctx.dp(10), ctx.dp(12), ctx.dp(10), ctx.dp(12))
 
         val rows = ArrayList<View>()
         for (item in items) {
             val row = LinearLayout(ctx)
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER_VERTICAL
-            row.setPadding(ctx.dp(14), 0, ctx.dp(14), 0)
+            row.setPadding(ctx.dp(16), ctx.dp(10), ctx.dp(16), ctx.dp(10))
+            row.minimumHeight = ctx.dp(52)
             val highlight = if (item.checked) withAlpha(c.accent, 0x26) else 0
             row.pressable(if (highlight != 0) shape(highlight, ctx.dpf(20f)) else null, withAlpha(c.ink, 0x1A), ctx.dpf(20f))
             val color = if (item.destructive) c.accent else c.ink
@@ -69,7 +70,7 @@ class MenuPopupView(
                     item.action()
                 }
             }
-            card.addView(row, LinearLayout.LayoutParams(MATCH, ctx.dp(48)))
+            card.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
             rows.add(row)
         }
 
@@ -78,7 +79,7 @@ class MenuPopupView(
         scroll.isVerticalScrollBarEnabled = false
         scroll.overScrollMode = View.OVER_SCROLL_NEVER
         scroll.addView(card, FrameLayout.LayoutParams(MATCH, WRAP))
-        val lp = LayoutParams(ctx.dp(280), WRAP, Gravity.BOTTOM or Gravity.END)
+        val lp = LayoutParams(ctx.dp(300), WRAP, Gravity.BOTTOM or Gravity.END)
         lp.setMargins(0, 0, ctx.dp(10), bottomInset)
         // keep very long menus inside the screen
         scroll.post {

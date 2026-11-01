@@ -21,7 +21,6 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:label="Facet"
         android:theme="@style/Theme.Facet"
-        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="true">
 
         <activity

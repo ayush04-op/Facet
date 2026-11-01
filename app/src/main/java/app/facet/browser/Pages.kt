@@ -33,6 +33,7 @@ interface SettingsHost {
     fun openAiSettings()
     fun openExtensions()
     fun openHome()
+    fun applySystemUi()
     fun homeChanged()
     fun pickWallpaper()
     fun openUrl(url: String)

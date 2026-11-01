@@ -81,6 +81,11 @@ fun appearancePage(h: SettingsHost): View {
         b.choice("Match system", null, p.theme == 0) { h.applyTheme(0) }
         b.choice("Paper (light)", null, p.theme == 1) { h.applyTheme(1) }
         b.choice("Paper Dark", null, p.theme == 2) { h.applyTheme(2) }
+        b.section("Display")
+        b.toggle("Full screen", "Hide the status bar so pages use the whole screen. Swipe down from the top edge to peek at it.", p.getBool("fullscreen_ui", true)) {
+            p.putBool("fullscreen_ui", it)
+            h.applySystemUi()
+        }
         b.note("Facet always uses Prism Serif for headings and Prism Sans for text.")
     }
 }
