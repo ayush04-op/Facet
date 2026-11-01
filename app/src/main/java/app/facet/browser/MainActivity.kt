@@ -964,12 +964,33 @@ class MainActivity : Activity() {
 
     private fun handleIntent(i: Intent?) {
         if (i == null) return
+        val step = i.getStringExtra("facet_ui_step")
+        if (step != null && (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            uiStep(step)
+            return
+        }
         if (i.action == Intent.ACTION_VIEW) {
             val data = i.data ?: return
             val s = data.toString()
             if (s.startsWith("http://") || s.startsWith("https://")) {
                 newTab(s, false)
             }
+        }
+    }
+
+    /**
+     * Debug builds only: lets the automated emulator check step through the interface without having to find
+     * buttons on a screen that is always animating. Only opens and closes screens; changes no data.
+     */
+    private fun uiStep(step: String) {
+        when (step) {
+            "skip" -> if (onboardView != null) finishOnboarding()
+            "menu" -> showMenu()
+            "settings" -> { closeAllOverlays(); showSettings() }
+            "appearance" -> showOverlay(appearancePage(host))
+            "back" -> onBackPressed()
+            "web" -> navigate("https://example.com")
+            "tabs" -> showTabSwitcher()
         }
     }
 
