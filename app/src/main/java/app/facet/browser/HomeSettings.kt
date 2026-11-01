@@ -92,20 +92,24 @@ object HomeLook {
 
     class Look(val wallpaper: WallpaperView, val glass: GlassSource?)
 
-    fun build(ctx: Context, cfg: HomeConfig, dark: Boolean): Look {
+    fun build(ctx: Context, cfg: HomeConfig, dark: Boolean, amoled: Boolean = false): Look {
         val dm = ctx.resources.displayMetrics
         // Decode at about half the screen: plenty for a background and cheap to keep.
         val w = dm.widthPixels / 2
         val h = dm.heightPixels / 2
-        val k = "${cfg.wallpaper}/$dark/${cfg.blur}/${cfg.customStamp}/$w/$h"
+        val dim = if (amoled) Math.max(cfg.dimAlpha, 0xB3) else cfg.dimAlpha
+        val k = "${cfg.wallpaper}/$dark/${cfg.blur}/${cfg.customStamp}/$w/$h/$dim"
         if (k != key || sharp == null) {
             var s: Bitmap? = if (cfg.wallpaper == 9) Wallpapers.custom(ctx) else null
             if (s == null) s = Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, dark, w, h)
             sharp = s
-            blurred = Wallpapers.blurred(s, cfg.blur)
+            val soft = Wallpapers.blurred(s, cfg.blur)
+            // the glass must see the same dimming as the wallpaper itself
+            if (dim > 0) android.graphics.Canvas(soft).drawColor(withAlpha(0x000000, dim))
+            blurred = soft
             key = k
         }
-        val view = WallpaperView(ctx, sharp!!, cfg.dimAlpha)
+        val view = WallpaperView(ctx, sharp!!, dim)
         val src = if (cfg.glass) GlassSource(blurred!!, dark) else null
         src?.origin = view
         return Look(view, src)

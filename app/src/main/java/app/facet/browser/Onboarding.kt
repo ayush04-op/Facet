@@ -56,6 +56,7 @@ private class ThemePreview(ctx: Context, private val mode: Int) : View(ctx) {
         when (mode) {
             1 -> drawSide(canvas, Palette.light, 0f, w)
             2 -> drawSide(canvas, Palette.dark, 0f, w)
+            3 -> drawSide(canvas, Palette.amoled, 0f, w)
             else -> { drawSide(canvas, Palette.light, 0f, w / 2f); drawSide(canvas, Palette.dark, w / 2f, w) }
         }
     }
@@ -91,7 +92,7 @@ class OnboardingView(
         setBackgroundColor(c.bg)
         val dm = ctx.resources.displayMetrics
         val bg = FrameLayout(ctx)
-        val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, dm.heightPixels / 2), 0)
+        val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, dm.heightPixels / 2), if (c.amoled) 0xB3 else 0)
         bg.addView(wp, LayoutParams(MATCH, dm.heightPixels))
         val aurora = AuroraView(ctx, c)
         aurora.alpha = 0.8f
@@ -448,42 +449,49 @@ class OnboardingView(
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
         col.addView(title("Choose your look", "Paper is Facet's warm, quiet theme. Pick light, dark, or follow your phone."))
-        val row = LinearLayout(ctx)
-        row.orientation = LinearLayout.HORIZONTAL
-        val names = listOf("Match phone", "Paper", "Paper Dark")
-        for (mode in 0..2) {
-            val cell = LinearLayout(ctx)
-            cell.orientation = LinearLayout.VERTICAL
-            cell.gravity = Gravity.CENTER_HORIZONTAL
-            val sel = prefs.theme == mode
-            val frame = FrameLayout(ctx)
-            frame.background = shape(0, ctx.dpf(20f), if (sel) c.accent else c.line, if (sel) ctx.dp(3) else ctx.dp(1))
-            frame.setPadding(ctx.dp(4), ctx.dp(4), ctx.dp(4), ctx.dp(4))
-            val pv = ThemePreview(ctx, mode)
-            pv.outlineProvider = ViewOutlineProvider.BACKGROUND
-            pv.background = shape(0xFF000000.toInt(), ctx.dpf(16f))
-            pv.clipToOutline = true
-            frame.addView(pv, FrameLayout.LayoutParams(MATCH, MATCH))
-            cell.addView(frame, LinearLayout.LayoutParams(MATCH, ctx.dp(210)))
-            val nm = makeText(ctx, names[mode], 15f, if (sel) c.accent else c.ink, Fonts.sansMedium)
-            val nlp = LinearLayout.LayoutParams(WRAP, WRAP)
-            nlp.topMargin = ctx.dp(10)
-            cell.addView(nm, nlp)
-            cell.setOnClickListener {
-                if (prefs.theme != mode) {
-                    prefs.theme = mode
-                    hooks.retheme(3)
+        val grid = LinearLayout(ctx)
+        grid.orientation = LinearLayout.VERTICAL
+        val names = listOf("Match phone", "Paper", "Paper Dark", "Paper AMOLED")
+        for (r in 0..1) {
+            val row = LinearLayout(ctx)
+            row.orientation = LinearLayout.HORIZONTAL
+            for (k in 0..1) {
+                val mode = r * 2 + k
+                val cell = LinearLayout(ctx)
+                cell.orientation = LinearLayout.VERTICAL
+                cell.gravity = Gravity.CENTER_HORIZONTAL
+                val sel = prefs.theme == mode
+                val frame = FrameLayout(ctx)
+                frame.background = shape(0, ctx.dpf(20f), if (sel) c.accent else c.line, if (sel) ctx.dp(3) else ctx.dp(1))
+                frame.setPadding(ctx.dp(4), ctx.dp(4), ctx.dp(4), ctx.dp(4))
+                val pv = ThemePreview(ctx, mode)
+                pv.outlineProvider = ViewOutlineProvider.BACKGROUND
+                pv.background = shape(0xFF000000.toInt(), ctx.dpf(16f))
+                pv.clipToOutline = true
+                frame.addView(pv, FrameLayout.LayoutParams(MATCH, MATCH))
+                cell.addView(frame, LinearLayout.LayoutParams(MATCH, ctx.dp(150)))
+                val nm = makeText(ctx, names[mode], 15f, if (sel) c.accent else c.ink, Fonts.sansMedium)
+                val nlp = LinearLayout.LayoutParams(WRAP, WRAP)
+                nlp.topMargin = ctx.dp(8)
+                cell.addView(nm, nlp)
+                cell.setOnClickListener {
+                    if (prefs.theme != mode) {
+                        prefs.theme = mode
+                        hooks.retheme(3)
+                    }
                 }
+                val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+                lp.leftMargin = ctx.dp(5)
+                lp.rightMargin = ctx.dp(5)
+                lp.bottomMargin = ctx.dp(14)
+                row.addView(cell, lp)
             }
-            val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
-            lp.leftMargin = ctx.dp(5)
-            lp.rightMargin = ctx.dp(5)
-            row.addView(cell, lp)
+            grid.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         val rlp = LinearLayout.LayoutParams(MATCH, WRAP)
-        rlp.topMargin = ctx.dp(26)
-        col.addView(row, rlp)
-        reveal(row, 200L)
+        rlp.topMargin = ctx.dp(22)
+        col.addView(grid, rlp)
+        reveal(grid, 200L)
         return scrolled(col)
     }
 
@@ -571,7 +579,7 @@ class OnboardingView(
         box.addView(h, hlp)
         reveal(h, 500L)
 
-        val themeName = when (prefs.theme) { 1 -> "Paper"; 2 -> "Paper Dark"; else -> "Match phone" }
+        val themeName = when (prefs.theme) { 1 -> "Paper"; 2 -> "Paper Dark"; 3 -> "Paper AMOLED"; else -> "Match phone" }
         val profile = state.profile.ifEmpty { "Personal" }
         val summary = card()
         summary.setPadding(ctx.dp(20), ctx.dp(8), ctx.dp(20), ctx.dp(8))

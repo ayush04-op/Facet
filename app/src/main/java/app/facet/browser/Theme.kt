@@ -9,7 +9,8 @@ class Colors(
     val line: Int,
     val accent: Int,
     val glass: Int,
-    val glassEdge: Int
+    val glassEdge: Int,
+    val amoled: Boolean = false
 )
 
 /** Paper palette, taken from Prism Client's Paper / Paper Dark themes. */
@@ -34,6 +35,19 @@ object Palette {
         glass = 0xE6FFFCF4.toInt(),
         glassEdge = 0x99FFFFFF.toInt()
     )
+    /** Pure black Paper Dark for OLED screens: true black saves battery and gives the deepest contrast. */
+    val amoled = Colors(
+        dark = true,
+        bg = 0xFF000000.toInt(),
+        surface = 0xFF0D0B09.toInt(),
+        ink = 0xFFF3EBDA.toInt(),
+        muted = 0xFF978A7A.toInt(),
+        line = 0xFF221C16.toInt(),
+        accent = 0xFFD4693F.toInt(),
+        glass = 0xE6000000.toInt(),
+        glassEdge = 0x33FFFFFF.toInt(),
+        amoled = true
+    )
     val dark = Colors(
         dark = true,
         bg = 0xFF15110E.toInt(),
@@ -49,9 +63,9 @@ object Palette {
 
 class AccentChoice(val name: String, val light: Int, val dark: Int)
 
-fun Palette.make(dark: Boolean, accent: Int): Colors {
-    val base = if (dark) Palette.dark else Palette.light
+fun Palette.make(dark: Boolean, accent: Int, amoled: Boolean = false): Colors {
+    val base = if (amoled) Palette.amoled else if (dark) Palette.dark else Palette.light
     val a = Palette.accents.getOrNull(accent) ?: return base
     if (accent == 0) return base
-    return Colors(base.dark, base.bg, base.surface, base.ink, base.muted, base.line, if (dark) a.dark else a.light, base.glass, base.glassEdge)
+    return Colors(base.dark, base.bg, base.surface, base.ink, base.muted, base.line, if (base.dark) a.dark else a.light, base.glass, base.glassEdge, base.amoled)
 }

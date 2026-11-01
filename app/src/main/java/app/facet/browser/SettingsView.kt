@@ -71,7 +71,7 @@ class SettingsView(
         val ws = WorkspaceStore(prefs).current()
         val reminders = SitePermStore(prefs).reminders().size
         val avail = prefs.availableUpdate
-        val themeName = when (prefs.theme) { 1 -> "Paper (light)"; 2 -> "Paper Dark"; else -> "Match system" }
+        val themeName = when (prefs.theme) { 1 -> "Paper (light)"; 2 -> "Paper Dark"; 3 -> "Paper AMOLED"; else -> "Match system" }
         return listOf(
             Entry("Software update", if (avail.isNotEmpty()) "$avail is available" else "Version ${host.version}", "update upgrade version device status") { host.openUpdates() },
             Entry("Profiles", "${ws.name} · personal, work, research and temporary", "profiles profile workspace temporary session separate switch") { host.openWorkspaces() },

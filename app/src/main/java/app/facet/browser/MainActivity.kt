@@ -349,10 +349,10 @@ class MainActivity : Activity() {
     private fun resolveColors(): Colors {
         val dark = when (prefs.theme) {
             1 -> false
-            2 -> true
+            2, 3 -> true
             else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
-        return Palette.make(dark, HomeConfig(prefs).accent)
+        return Palette.make(dark, HomeConfig(prefs).accent, prefs.theme == 3)
     }
 
     @Suppress("DEPRECATION")
@@ -681,7 +681,7 @@ class MainActivity : Activity() {
                     { newTab(null, true) }
                 ),
                 cfgHome, prefs,
-                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark)
+                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark, c.amoled)
             )
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
