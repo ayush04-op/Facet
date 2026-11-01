@@ -2,42 +2,40 @@ package app.facet.browser
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.view.View
 import android.view.animation.LinearInterpolator
 
-/** The Facet gem, as nine flat facets on a 108 unit grid (the same shapes as the launcher icon). */
-object Gem {
-    class Facet(val pts: FloatArray, val color: Int)
-
-    val facets = listOf(
-        Facet(floatArrayOf(24f, 44f, 40f, 30f, 39f, 44f), 0xFFF4B08A.toInt()),
-        Facet(floatArrayOf(40f, 30f, 54f, 44f, 39f, 44f), 0xFFFFD9B8.toInt()),
-        Facet(floatArrayOf(40f, 30f, 68f, 30f, 54f, 44f), 0xFFFFEFDD.toInt()),
-        Facet(floatArrayOf(68f, 30f, 69f, 44f, 54f, 44f), 0xFFF0A070.toInt()),
-        Facet(floatArrayOf(68f, 30f, 84f, 44f, 69f, 44f), 0xFFD9774A.toInt()),
-        Facet(floatArrayOf(24f, 44f, 39f, 44f, 54f, 86f), 0xFFC8623A.toInt()),
-        Facet(floatArrayOf(39f, 44f, 54f, 44f, 54f, 86f), 0xFFE0804F.toInt()),
-        Facet(floatArrayOf(54f, 44f, 69f, 44f, 54f, 86f), 0xFFB5532F.toInt()),
-        Facet(floatArrayOf(69f, 44f, 84f, 44f, 54f, 86f), 0xFF8F3E20.toInt())
-    )
-}
-
 /**
- * The logo, animated: the facets fly in from outside and snap together with a spring, then a band of light
- * sweeps across the gem now and then and the whole thing floats gently.
+ * The logo, animated: the four pieces (sage arc, terracotta arc, sand swirl, pen tip) swing in from outside and
+ * settle with a spring, then a band of light sweeps across now and then and the whole mark floats gently.
  */
 class LogoView(context: Context, private val withGlow: Boolean = true) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val path = Path()
+    private class Piece(val bmp: Bitmap, val dx: Float, val dy: Float, val rot: Float, val from: Float, val scale: Float)
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val spring = SpringInterpolator(0.28f, 0.55f)
-    private var build = 0f      // 0..1 assembly progress
-    private var sweep = -1f     // light band position, -1 = off
+    private fun load(id: Int): Bitmap = BitmapFactory.decodeResource(resources, id)
+    // dx/dy are the offsets (in logo widths) the piece starts from, rot the angle it starts at, from the delay
+    private val pieces = listOf(
+        Piece(load(R.drawable.logo_teal), -0.55f, -0.25f, -70f, 0.00f, 0.7f),
+        Piece(load(R.drawable.logo_red), 0.55f, -0.30f, 70f, 0.10f, 0.7f),
+        Piece(load(R.drawable.logo_swirl), 0.0f, 0.55f, 40f, 0.22f, 0.8f),
+        Piece(load(R.drawable.logo_tip), 0.25f, -0.6f, 160f, 0.45f, 0.2f)
+    )
+    private var build = 0f
+    private var sweep = -1f
     private var floatT = 0f
     private var buildAnim: ValueAnimator? = null
     private var loop: ValueAnimator? = null
@@ -63,7 +61,6 @@ class LogoView(context: Context, private val withGlow: Boolean = true) : View(co
         l.addUpdateListener {
             val t = it.animatedValue as Float
             floatT = t
-            // the band crosses during the first 40% of each cycle
             sweep = if (t < 0.4f) -0.3f + 1.6f * (t / 0.4f) else -1f
             invalidate()
         }
@@ -78,53 +75,41 @@ class LogoView(context: Context, private val withGlow: Boolean = true) : View(co
     }
 
     override fun onDraw(canvas: Canvas) {
-        val s = Math.min(width, height) / 108f
-        if (s <= 0f) return
-        val ox = (width - 108f * s) / 2f
-        val oy = (height - 108f * s) / 2f + (Math.sin(floatT * 2.0 * Math.PI) * 1.6 * s).toFloat()
-        canvas.save()
-        canvas.translate(ox, oy)
-        canvas.scale(s, s)
+        val size = Math.min(width, height) * 0.84f
+        if (size <= 0f) return
+        val cx = width / 2f
+        val cy = height / 2f + (Math.sin(floatT * 2.0 * Math.PI) * 0.018 * size).toFloat()
         if (withGlow) {
-            glow.shader = android.graphics.RadialGradient(54f, 56f, 46f, 0x55E58A5F, 0x00E58A5F, Shader.TileMode.CLAMP)
-            canvas.drawCircle(54f, 56f, 46f, glow)
+            glow.shader = RadialGradient(cx, cy, size * 0.62f, 0x44D4693F, 0x00D4693F, Shader.TileMode.CLAMP)
+            canvas.drawCircle(cx, cy, size * 0.62f, glow)
         }
-        val n = Gem.facets.size
-        val clip = Path()
-        for ((i, f) in Gem.facets.withIndex()) {
-            val local = ((build * (n + 3) - i) / 3f).coerceIn(0f, 1f)
+        val sweeping = build >= 1f && sweep > -0.9f
+        val layer = if (sweeping) canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null) else -1
+        for (p in pieces) {
+            val local = ((build - p.from) / 0.55f).coerceIn(0f, 1f)
             if (local <= 0f) continue
             val e = spring.getInterpolation(local)
-            // direction away from the gem's centre
-            var cx = 0f; var cy = 0f
-            for (k in 0 until 3) { cx += f.pts[k * 2] / 3f; cy += f.pts[k * 2 + 1] / 3f }
-            val dx = (cx - 54f) * 1.4f + (if (cx < 54f) -26f else 26f)
-            val dy = (cy - 56f) * 1.4f - 20f
-            val tx = dx * (1f - e)
-            val ty = dy * (1f - e)
-            path.reset()
-            path.moveTo(f.pts[0] + tx, f.pts[1] + ty)
-            path.lineTo(f.pts[2] + tx, f.pts[3] + ty)
-            path.lineTo(f.pts[4] + tx, f.pts[5] + ty)
-            path.close()
-            paint.color = withAlpha(f.color, (255 * local.coerceAtMost(1f)).toInt())
-            paint.style = Paint.Style.FILL
-            canvas.drawPath(path, paint)
-            if (e >= 0.98f) {
-                clip.moveTo(f.pts[0], f.pts[1]); clip.lineTo(f.pts[2], f.pts[3]); clip.lineTo(f.pts[4], f.pts[5]); clip.close()
-            }
-        }
-        // sweeping light, clipped to the gem
-        if (build >= 1f && sweep > -0.9f) {
+            val inv = 1f - e
+            val sc = p.scale + (1f - p.scale) * e
             canvas.save()
-            canvas.clipPath(clip)
-            val x = 24f + 60f * sweep
-            paint.shader = LinearGradient(x - 10f, 30f, x + 10f, 60f, intArrayOf(0x00FFFFFF, 0x99FFFFFF.toInt(), 0x00FFFFFF), null, Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, 20f, 108f, 90f, paint)
-            paint.shader = null
+            canvas.translate(cx + p.dx * size * inv, cy + p.dy * size * inv)
+            canvas.rotate(p.rot * inv)
+            canvas.scale(sc * size / p.bmp.width, sc * size / p.bmp.height)
+            canvas.translate(-p.bmp.width / 2f, -p.bmp.height / 2f)
+            paint.alpha = (255 * Math.min(1f, local * 2.5f)).toInt()
+            canvas.drawBitmap(p.bmp, 0f, 0f, paint)
             canvas.restore()
         }
-        canvas.restore()
+        if (sweeping) {
+            // a band of light, drawn only where the logo already has pixels
+            val x = cx - size / 2f + size * sweep
+            sweepPaint.shader = LinearGradient(x - size * 0.12f, cy - size * 0.3f, x + size * 0.12f, cy + size * 0.3f,
+                intArrayOf(0x00FFFFFF, 0x88FFFFFF.toInt(), 0x00FFFFFF), null, Shader.TileMode.CLAMP)
+            sweepPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+            canvas.drawRect(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f, sweepPaint)
+            sweepPaint.xfermode = null
+            canvas.restoreToCount(layer)
+        }
     }
 }
 

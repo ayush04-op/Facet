@@ -41,7 +41,7 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Liquid glass** panels, your own **wallpaper**, an optional **clock and weather**, and accent colours, all under Settings, Home page
 - Upgraded animations
 - **Animated welcome** for first-time users, then quick choices: profile name, search engine, theme, accent and wallpaper
-- **Profiles** (formerly workspaces), plus a refreshed gem logo
+- **Profiles** (formerly workspaces), plus a refreshed logo
 - Session restore after a crash, and a redesigned animated home page
 
 ## Building
