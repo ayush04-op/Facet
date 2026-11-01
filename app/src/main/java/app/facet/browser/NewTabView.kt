@@ -42,12 +42,17 @@ class NewTabView(
 
     private val glass: GlassSource? = look?.glass
     private val col = LinearLayout(ctx)
+    private val topFade: EdgeFadeView? = glass?.let { EdgeFadeView(ctx, it, true) }
+    private val bottomFade: EdgeFadeView? = glass?.let { EdgeFadeView(ctx, it, false) }
 
-    /** Keeps the content clear of the status bar at the top and the (floating) bottom bar below. */
+    /** Keeps the content clear of the status bar at the top and the floating toolbar below. */
     fun setInsets(top: Int, bottom: Int) {
         val t = context.dp(14) + top
         val b = context.dp(10) + bottom
         if (col.paddingTop != t || col.paddingBottom != b) col.setPadding(col.paddingLeft, t, col.paddingRight, b)
+        // scroll edge effect: content fades into frosted glass under the status bar and under the toolbar
+        topFade?.let { f -> val h = top + context.dp(18); if (f.layoutParams.height != h) f.layoutParams = f.layoutParams.also { it.height = h } }
+        bottomFade?.let { f -> val h = bottom + context.dp(12); if (f.layoutParams.height != h) f.layoutParams = f.layoutParams.also { it.height = h } }
     }
 
     init {
@@ -218,6 +223,8 @@ class NewTabView(
         }
         scroll.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, MATCH))
+        topFade?.let { addView(it, LayoutParams(MATCH, 0, Gravity.TOP)) }
+        bottomFade?.let { addView(it, LayoutParams(MATCH, 0, Gravity.BOTTOM)) }
     }
 
     private fun greetingFor(name: String): String {

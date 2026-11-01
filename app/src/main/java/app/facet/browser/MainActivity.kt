@@ -48,6 +48,8 @@ import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebResponse
 import java.util.concurrent.atomic.AtomicInteger
 
+private val PAGE_EASE = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+
 class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
@@ -84,6 +86,9 @@ class MainActivity : Activity() {
     private var barFloating = false
     private var homeGlass: GlassSource? = null
     private lateinit var bottomStack: LinearLayout
+    private lateinit var addrPill: LinearLayout
+    private lateinit var navLeft: LinearLayout
+    private lateinit var navRight: LinearLayout
     private val overlayBase = HashMap<View, IntArray>()
     private var pendingAndroidPerm: GeckoSession.PermissionDelegate.Callback? = null
     private var pendingActivity: GeckoResult<Intent>? = null
@@ -366,6 +371,12 @@ class MainActivity : Activity() {
         return Palette.make(dark, HomeConfig(prefs).accent, prefs.theme == 3)
     }
 
+    private fun highContrastText(): Boolean = try {
+        Settings.Secure.getInt(contentResolver, "high_text_contrast_enabled", 0) == 1
+    } catch (e: Exception) {
+        false
+    }
+
     /** Immersive mode hides both system bars. Off by default: Facet sits edge to edge like Chrome instead. */
     private fun fullUi(): Boolean = prefs.getBool("immersive_ui", false)
 
@@ -448,10 +459,10 @@ class MainActivity : Activity() {
         val kb = insIme > 0
         val lp = bottomStack.layoutParams as FrameLayout.LayoutParams
         if (barFloating) {
-            lp.leftMargin = dp(10)
-            lp.rightMargin = dp(10)
-            lp.bottomMargin = (if (kb) insIme else insNav) + dp(8)
-            bottomBar.setPadding(0, 0, 0, dp(4))
+            lp.leftMargin = dp(12)
+            lp.rightMargin = dp(12)
+            lp.bottomMargin = (if (kb) insIme else insNav) + dp(6)
+            bottomBar.setPadding(0, 0, 0, 0)
         } else {
             lp.leftMargin = 0
             lp.rightMargin = 0
@@ -463,6 +474,7 @@ class MainActivity : Activity() {
         for ((v, base) in overlayBase) padOverlay(v, base)
         onboardView?.setInsets(insTop, if (kb) insIme else insNav)
         bottomBar.invalidate()
+        if (::addrPill.isInitialized) { addrPill.invalidate(); navLeft.invalidate(); navRight.invalidate() }
     }
 
     private fun barSpace(): Int {
@@ -491,21 +503,76 @@ class MainActivity : Activity() {
         }
     }
 
-    /** The home page with glass gets a floating liquid glass bottom bar; web pages get a solid, full-width one. */
+    /** The glass backdrop for whatever is on screen: the home wallpaper, or the plain page colour. */
+    private fun currentBackdrop(): GlassSource {
+        val g = homeGlass
+        if (g != null && current?.showsNewTab == true) return g
+        return GlassSource.plain(c.bg, c.dark)
+    }
+
+    /** Captures the page once (GeckoView can render it to a bitmap) so a menu or sheet can refract it. */
+    private fun withBackdrop(then: (GlassSource) -> Unit) {
+        val t = current
+        if (t == null || t.showsNewTab || fullscreen || geckoView.parent == null) {
+            Backdrop.set(currentBackdrop(), false)
+            then(Backdrop.get())
+            return
+        }
+        var done = false
+        val finish = { src: GlassSource ->
+            if (!done) {
+                done = true
+                Backdrop.set(src, true)
+                then(src)
+            }
+        }
+        val fallback = Runnable { finish(GlassSource.plain(c.bg, c.dark)) }
+        rootFrame.postDelayed(fallback, 350L)
+        try {
+            geckoView.capturePixels().accept({ bmp ->
+                rootFrame.post {
+                    rootFrame.removeCallbacks(fallback)
+                    finish(if (bmp != null) snapshotSource(bmp) else GlassSource.plain(c.bg, c.dark))
+                }
+            }, { _ -> rootFrame.post { rootFrame.removeCallbacks(fallback); finish(GlassSource.plain(c.bg, c.dark)) } })
+        } catch (e: Throwable) {
+            rootFrame.removeCallbacks(fallback)
+            finish(GlassSource.plain(c.bg, c.dark))
+        }
+    }
+
+    private fun snapshotSource(bmp: android.graphics.Bitmap): GlassSource {
+        return try {
+            val sw = Math.max(1, bmp.width / 2)
+            val sh = Math.max(1, bmp.height / 2)
+            val sharp = android.graphics.Bitmap.createScaledBitmap(bmp, sw, sh, true)
+            val src = GlassSource(Wallpapers.blurred(sharp, 1), c.dark, sharp, 0)
+            src.origin = geckoView
+            src
+        } catch (e: Throwable) {
+            GlassSource.plain(c.bg, c.dark)
+        }
+    }
+
+    /**
+     * The toolbar floats on the Liquid Glass layer: the address capsule and two grouped button capsules, inset
+     * from the screen edges. Over the home page they refract the wallpaper; over web pages, the page colour.
+     */
     private fun styleBar() {
         if (!::bottomStack.isInitialized) return
-        val g = homeGlass
-        barFloating = g != null && current?.showsNewTab == true
-        if (barFloating && g != null) {
-            bottomBar.background = GlassDrawable(g, bottomBar, dpf(28f), resources.displayMetrics.density)
-        } else {
-            bottomBar.setBackgroundColor(c.bg)
-        }
+        barFloating = true
+        val src = currentBackdrop()
+        val d = resources.displayMetrics.density
+        bottomBar.background = null
+        addrPill.background = GlassDrawable(src, addrPill, dpf(26f), d)
+        navLeft.background = GlassDrawable(src, navLeft, dpf(26f), d)
+        navRight.background = GlassDrawable(src, navRight, dpf(26f), d)
         applyInsets()
     }
 
     private fun buildUi() {
         c = resolveColors()
+        GlassPrefs.reduceTransparency = prefs.getBool("reduce_transparency", false) || highContrastText()
 
         rootFrame = FrameLayout(this)
         rootFrame.setBackgroundColor(c.bg)
@@ -538,6 +605,7 @@ class MainActivity : Activity() {
         contentHost.removeAllViews()
         overlays.clear()
         overlayBase.clear()
+        contentHost.translationX = 0f
         tabSwitcher = null
         settingsView = null
         buildUi()
@@ -557,7 +625,6 @@ class MainActivity : Activity() {
     private fun buildBottomBar(): LinearLayout {
         val bar = LinearLayout(this)
         bar.orientation = LinearLayout.VERTICAL
-        bar.setBackgroundColor(c.bg)
 
         // Address pill
         val pill = LinearLayout(this)
@@ -565,7 +632,7 @@ class MainActivity : Activity() {
         pill.gravity = Gravity.CENTER_VERTICAL
         pill.background = shape(c.glass, dpf(26f), c.glassEdge, dp(1))
         pill.setPadding(dp(16), 0, dp(4), 0)
-        pill.elevation = dpf(2f)
+        addrPill = pill
 
         lockIcon = IconView(this, Icon.SEARCH, c.muted, 18)
         lockIcon.setOnClickListener { showSiteInfo() }
@@ -579,6 +646,7 @@ class MainActivity : Activity() {
         addressEdit.setTextColor(c.ink)
         addressEdit.setHintTextColor(c.muted)
         addressEdit.hint = "Search or enter address"
+        addressEdit.contentDescription = "Address"
         addressEdit.isSingleLine = true
         addressEdit.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         addressEdit.imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
@@ -610,7 +678,7 @@ class MainActivity : Activity() {
         pill.addView(reload.first, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         val pillLp = LinearLayout.LayoutParams(MATCH, dp(52))
-        pillLp.setMargins(dp(12), dp(8), dp(12), dp(2))
+        pillLp.setMargins(0, dp(6), 0, dp(8))
         bar.addView(pill, pillLp)
 
         // Navigation row
@@ -627,9 +695,26 @@ class MainActivity : Activity() {
         tabsIcon = tabsBtn.second
         val menu = iconButton(Icon.MENU, 48, 24) { showMenu() }
 
-        for (b in listOf(back.first, fwd.first, add.first, tabsBtn.first, menu.first)) {
-            nav.addView(b, LinearLayout.LayoutParams(0, dp(48), 1f))
-        }
+        // Toolbar items grouped by what they do, each group on its own glass capsule (Liquid Glass guidance):
+        // history on the left, tabs and the menu on the right.
+        navLeft = LinearLayout(this)
+        navLeft.orientation = LinearLayout.HORIZONTAL
+        navLeft.gravity = Gravity.CENTER_VERTICAL
+        navLeft.setPadding(dp(4), 0, dp(4), 0)
+        for (b in listOf(back.first, fwd.first)) navLeft.addView(b, LinearLayout.LayoutParams(dp(52), dp(48)))
+        navRight = LinearLayout(this)
+        navRight.orientation = LinearLayout.HORIZONTAL
+        navRight.gravity = Gravity.CENTER_VERTICAL
+        navRight.setPadding(dp(4), 0, dp(4), 0)
+        for (b in listOf(add.first, tabsBtn.first, menu.first)) navRight.addView(b, LinearLayout.LayoutParams(dp(52), dp(48)))
+        back.first.contentDescription = "Back"
+        fwd.first.contentDescription = "Forward"
+        add.first.contentDescription = "New tab"
+        tabsBtn.first.contentDescription = "Tabs"
+        menu.first.contentDescription = "Menu"
+        nav.addView(navLeft, LinearLayout.LayoutParams(WRAP, dp(52)))
+        nav.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        nav.addView(navRight, LinearLayout.LayoutParams(WRAP, dp(52)))
         bar.addView(nav, LinearLayout.LayoutParams(MATCH, dp(52)))
         return bar
     }
@@ -806,6 +891,7 @@ class MainActivity : Activity() {
                 s.loadUri(pending)
             }
         }
+        Backdrop.set(currentBackdrop(), false)
         styleBar()
         refreshChrome()
     }
@@ -1307,13 +1393,33 @@ class MainActivity : Activity() {
         updateBackdrop()
         overlayBase[v] = intArrayOf(v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom)
         padOverlay(v, overlayBase[v]!!)
+        val under = pageUnder()
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
-        if (v !is SheetView) {
+        if (isPage(v)) {
+            // pages push in from the right; what was underneath drifts a little to the left
+            val w = pageWidth()
+            v.translationX = w
+            v.animate().translationX(0f).setDuration(340L).setInterpolator(PAGE_EASE).start()
+            for (u in under) u.animate().translationX(-w * 0.22f).setDuration(340L).setInterpolator(PAGE_EASE).start()
+        } else if (v !is SheetView && v !is MenuPopupView) {
             v.alpha = 0f
-            v.translationY = dpf(30f)
-            v.animate().alpha(1f).translationY(0f).setDuration(260L)
-                .setInterpolator(DecelerateInterpolator(2f)).start()
+            v.animate().alpha(1f).setDuration(200L).start()
         }
+    }
+
+    /** Full-screen pages (settings and the like), as opposed to sheets, menus and pop-ups. */
+    private fun isPage(v: View): Boolean =
+        v !is SheetView && v !is MenuPopupView && v !is InputSheetView && v !is CommandBarView
+
+    private fun pageWidth(): Float = (if (rootFrame.width > 0) rootFrame.width else resources.displayMetrics.widthPixels).toFloat()
+
+    /** The views a new page slides over: the page below it, or the browser itself. */
+    private fun pageUnder(): List<View> {
+        for (i in overlays.size - 2 downTo 0) {
+            val o = overlays[i]
+            if (isPage(o)) return listOf(o)
+        }
+        return listOf(contentHost, bottomStack)
     }
 
     private fun closeTopOverlay() {
@@ -1330,7 +1436,19 @@ class MainActivity : Activity() {
             v.cancel()
             return
         }
-        v.animate().alpha(0f).translationY(dpf(30f)).setDuration(190L)
+        if (isPage(v)) {
+            // back: the page slides out to the right and the one underneath comes back into place
+            val w = pageWidth()
+            val under = ArrayList<View>()
+            var found = false
+            for (i in overlays.size - 1 downTo 0) if (isPage(overlays[i])) { under.add(overlays[i]); found = true; break }
+            if (!found) { under.add(contentHost); under.add(bottomStack) }
+            for (u in under) u.animate().translationX(0f).setDuration(300L).setInterpolator(PAGE_EASE).start()
+            v.animate().translationX(w).setDuration(300L).setInterpolator(PAGE_EASE)
+                .withEndAction { rootFrame.removeView(v) }.start()
+            return
+        }
+        v.animate().alpha(0f).setDuration(160L)
             .withEndAction { rootFrame.removeView(v) }.start()
     }
 
@@ -1423,7 +1541,7 @@ class MainActivity : Activity() {
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
         items.add(SheetItem(Icon.GRID, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
-        showMenuPopup(items)
+        withBackdrop { showMenuPopup(items) }
     }
 
     private fun showMenuPopup(items: List<SheetItem>) {

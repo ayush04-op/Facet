@@ -2,7 +2,7 @@ name: Build Facet
 
 on:
   push:
-    branches: ['**']
+    branches: ['**', '!ui-shots']
     tags: ['v*']
   workflow_dispatch:
     inputs:

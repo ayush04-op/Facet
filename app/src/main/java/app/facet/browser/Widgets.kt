@@ -376,7 +376,7 @@ class BentoCard(context: Context, private val c: Colors, private val glass: Glas
 
     init {
         orientation = LinearLayout.VERTICAL
-        background = if (glass != null) GlassDrawable(glass, this, context.dpf(22f), context.resources.displayMetrics.density)
+        background = if (glass != null) GlassDrawable(glass, this, context.dpf(22f), context.resources.displayMetrics.density, GlassKind.CLEAR)
         else shape(c.surface, context.dpf(18f), c.line, context.dp(1))
         val p = context.dp(16)
         setPadding(p, p, p, p)

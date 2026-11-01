@@ -87,6 +87,11 @@ fun appearancePage(h: SettingsHost): View {
             p.putBool("immersive_ui", it)
             h.applySystemUi()
         }
+        b.toggle("Reduce transparency", "Make glass toolbars, menus and sheets nearly solid. Also follows the system's high-contrast text setting.", p.getBool("reduce_transparency", false)) {
+            p.putBool("reduce_transparency", it)
+            GlassPrefs.reduceTransparency = it
+            h.homeChanged()
+        }
         b.note("Facet always uses Prism Serif for headings and Prism Sans for text.")
     }
 }

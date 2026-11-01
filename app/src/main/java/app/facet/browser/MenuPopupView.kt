@@ -32,14 +32,17 @@ class MenuPopupView(
 
     init {
         isClickable = true
-        scrim.setBackgroundColor(0x40000000)
+        scrim.setBackgroundColor(0x1F000000)
         scrim.alpha = 0f
         scrim.setOnClickListener { animateOut { onDismiss() } }
         addView(scrim, LayoutParams(MATCH, MATCH))
 
         card.orientation = LinearLayout.VERTICAL
-        card.background = SquircleDrawable(withAlpha(c.bg, 0xEE), withAlpha(c.ink, if (c.dark) 0x26 else 0x1A), ctx.dpf(1f), ctx.dpf(30f))
-        card.elevation = ctx.dpf(10f)
+        // Liquid Glass menu: refracts whatever is behind it (the wallpaper, or a snapshot of the page)
+        val backdrop = Backdrop.get()
+        card.background = if (backdrop != null) GlassDrawable(backdrop, card, ctx.dpf(30f), ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg)
+        else SquircleDrawable(withAlpha(c.bg, 0xEE), withAlpha(c.ink, if (c.dark) 0x26 else 0x1A), ctx.dpf(1f), ctx.dpf(30f))
+        card.elevation = ctx.dpf(8f)
         card.isClickable = true
         card.setPadding(ctx.dp(10), ctx.dp(12), ctx.dp(10), ctx.dp(12))
 
