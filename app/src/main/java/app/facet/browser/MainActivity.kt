@@ -514,8 +514,9 @@ class MainActivity : Activity() {
     private fun withBackdrop(then: (GlassSource) -> Unit) {
         val t = current
         if (t == null || t.showsNewTab || fullscreen || geckoView.parent == null) {
-            Backdrop.set(currentBackdrop(), false)
-            then(Backdrop.get())
+            val src = currentBackdrop()
+            Backdrop.set(src, false)
+            then(src)
             return
         }
         var done = false
