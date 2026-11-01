@@ -127,6 +127,23 @@ object Wallpapers {
             p.shader = RadialGradient(w * spots[i][0], h * spots[i][1], r, withAlpha(blobs[i], if (dark) 0xB0 else 0xA0), withAlpha(blobs[i], 0), Shader.TileMode.CLAMP)
             cv.drawCircle(w * spots[i][0], h * spots[i][1], r, p)
         }
+        // two soft ribbons of light, so the glass has shapes to bend at its edges (as Prism's aurora does)
+        p.shader = null
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.maskFilter = android.graphics.BlurMaskFilter(w * 0.05f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        val ribbons = arrayOf(floatArrayOf(-0.1f, 0.34f, 0.5f, 0.12f, 1.1f, 0.42f, 0.16f), floatArrayOf(-0.1f, 0.78f, 0.45f, 0.6f, 1.1f, 0.7f, 0.11f))
+        for ((i, rb) in ribbons.withIndex()) {
+            val path = Path()
+            path.moveTo(w * rb[0], h * rb[1])
+            path.quadTo(w * rb[2], h * rb[3], w * rb[4], h * rb[5])
+            p.strokeWidth = w * rb[6]
+            p.color = withAlpha(blobs[i], if (dark) 0x8C else 0x99)
+            cv.drawPath(path, p)
+            p.strokeWidth = w * rb[6] * 0.25f
+            p.color = withAlpha(0xFFFFFF, if (dark) 0x26 else 0x66)
+            cv.drawPath(path, p)
+        }
         return bmp
     }
 
@@ -205,57 +222,176 @@ object Wallpapers {
 }
 
 /** Where the glass samples from: the blurred wallpaper and the layer it is laid out against. */
-class GlassSource(val blurred: Bitmap, val dark: Boolean) {
+class GlassSource(val blurred: Bitmap, val dark: Boolean, val sharp: Bitmap? = null, val dimAlpha: Int = 0) {
     var origin: View? = null
     val views = ArrayList<View>()
     fun invalidateAll() { for (v in views) v.invalidate() }
 }
 
 /**
- * Frosted "liquid glass": the blurred wallpaper seen through a rounded pane, a light tint, a bright top edge
- * and a thin rim. Because it samples the wallpaper at the pane's own position, panes stay see-through while
- * the page scrolls.
+ * The liquid glass shader (Android 13+). It treats the pane as a slab of glass with rounded edges: inside, the
+ * wallpaper is seen slightly magnified and frosted; towards the rim the surface curves away, so the backdrop is
+ * bent inwards (with a touch of colour fringing), and the rim catches light from the top left.
+ */
+object LiquidGlass {
+    const val SKSL = """
+uniform shader sharp;
+uniform shader frost;
+uniform float2 origin;
+uniform float2 size;
+uniform float radius;
+uniform float band;
+uniform float bend;
+uniform float frostAmt;
+uniform float dimAmt;
+uniform float isDark;
+uniform float px;
+
+float sdBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + float2(r, r);
+    return length(max(q, float2(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+half4 main(float2 xy) {
+    float2 hb = size * 0.5;
+    float2 c = origin + hb;
+    float2 p = xy - c;
+    float r = min(radius, min(hb.x, hb.y));
+    float d = sdBox(p, hb, r);
+    float aa = clamp(0.5 - d, 0.0, 1.0);
+    if (aa <= 0.0) { return half4(0.0, 0.0, 0.0, 0.0); }
+    float e = 0.75;
+    float2 g = float2(sdBox(p + float2(e, 0.0), hb, r) - sdBox(p - float2(e, 0.0), hb, r),
+                      sdBox(p + float2(0.0, e), hb, r) - sdBox(p - float2(0.0, e), hb, r));
+    float gl = max(length(g), 0.0001);
+    float2 n = g / gl;
+    float x = clamp(1.0 + d / band, 0.0, 1.0);
+    float lens = 1.0 - sqrt(max(1.0 - x * x, 0.0));
+    float2 q = c + p * 0.985 - n * (bend * lens);
+    float ca = px * 1.4 * lens;
+    float3 sh = float3(float(sharp.eval(q + n * ca).r), float(sharp.eval(q).g), float(sharp.eval(q - n * ca).b));
+    sh = sh * (1.0 - dimAmt);
+    float3 fr = float3(frost.eval(q).rgb);
+    float3 col = mix(sh, fr, frostAmt * (1.0 - 0.75 * lens));
+    float tAmt = isDark > 0.5 ? 0.16 : 0.24;
+    float3 tintc = isDark > 0.5 ? float3(0.0, 0.0, 0.0) : float3(1.0, 1.0, 1.0);
+    col = mix(col, tintc, tAmt);
+    float sheen = clamp(1.0 - (p.y + hb.y) / (size.y * 0.6), 0.0, 1.0);
+    float sheenAmt = isDark > 0.5 ? 0.07 : 0.15;
+    col = col + float3(1.0, 1.0, 1.0) * (sheen * sheen * sheenAmt);
+    float rim = smoothstep(-2.2 * px, 0.0, d);
+    float lit = dot(n, normalize(float2(-0.55, -0.85)));
+    float rimAmt = rim * (0.6 * max(lit, 0.0) + 0.2 * max(-lit, 0.0)) * (isDark > 0.5 ? 0.75 : 1.0);
+    col = col + float3(1.0, 1.0, 1.0) * (rimAmt + lens * 0.08 * max(lit, 0.0));
+    col = clamp(col, 0.0, 1.0);
+    return half4(half3(col * aa), half(aa));
+}
+"""
+    @Volatile private var broken = false
+
+    /** A fresh shader, or null where the platform can't run it (older Android, or a driver that rejects it). */
+    fun create(): android.graphics.RuntimeShader? {
+        if (broken || android.os.Build.VERSION.SDK_INT < 33) return null
+        return try {
+            android.graphics.RuntimeShader(SKSL)
+        } catch (e: Throwable) {
+            android.util.Log.w("Facet", "liquid glass shader rejected", e)
+            broken = true
+            null
+        }
+    }
+}
+
+/**
+ * Liquid glass pane. On Android 13+ it runs [LiquidGlass] over the sharp wallpaper (refraction at the edges,
+ * frost in the middle); on older versions it falls back to the frosted wallpaper with a sheen and rim. Either
+ * way it samples the wallpaper at the pane's own position, so panes stay see-through while the page scrolls.
  */
 class GlassDrawable(private val src: GlassSource, private val view: View, private val radius: Float, private val density: Float) : Drawable() {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
     private val tint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = density }
-    private val shader = BitmapShader(src.blurred, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = density * 1.2f }
+    private val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = density }
+    private val frostShader = BitmapShader(src.blurred, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    private val sharpShader = src.sharp?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
+    private val liquid = if (sharpShader != null) LiquidGlass.create() else null
+    private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val m = Matrix()
+    private val m2 = Matrix()
     private val rect = RectF()
     private val loc = IntArray(2)
     private val oloc = IntArray(2)
 
     init { src.views.add(view) }
 
+    /** Maps a bitmap that covers the origin view (centre-crop) into this pane's coordinates. */
+    private fun place(matrix: Matrix, bmp: Bitmap, o: View, dx: Float, dy: Float) {
+        val bw = bmp.width.toFloat()
+        val bh = bmp.height.toFloat()
+        val s = Math.max(o.width / bw, o.height / bh)
+        matrix.reset()
+        matrix.setScale(s, s)
+        matrix.postTranslate((o.width - bw * s) / 2f - dx, (o.height - bh * s) / 2f - dy)
+    }
+
     override fun draw(canvas: Canvas) {
         val o = src.origin
         rect.set(bounds)
+        if (rect.isEmpty) return
+        var dx = 0f
+        var dy = 0f
         if (o != null && o.width > 0) {
             view.getLocationInWindow(loc)
             o.getLocationInWindow(oloc)
-            val dx = (loc[0] - oloc[0]).toFloat()
-            val dy = (loc[1] - oloc[1]).toFloat()
-            val bw = src.blurred.width.toFloat()
-            val bh = src.blurred.height.toFloat()
-            val s = Math.max(o.width / bw, o.height / bh)
-            m.reset()
-            m.setScale(s, s)
-            m.postTranslate((o.width - bw * s) / 2f - dx, (o.height - bh * s) / 2f - dy)
-            shader.setLocalMatrix(m)
-            fill.shader = shader
+            dx = (loc[0] - oloc[0]).toFloat()
+            dy = (loc[1] - oloc[1]).toFloat()
+        }
+        val rs = liquid
+        if (rs != null && o != null && o.width > 0 && android.os.Build.VERSION.SDK_INT >= 33) {
+            place(m, src.blurred, o, dx, dy)
+            frostShader.setLocalMatrix(m)
+            place(m2, src.sharp!!, o, dx, dy)
+            sharpShader!!.setLocalMatrix(m2)
+            try {
+                rs.setInputShader("sharp", sharpShader)
+                rs.setInputShader("frost", frostShader)
+                rs.setFloatUniform("origin", rect.left, rect.top)
+                rs.setFloatUniform("size", rect.width(), rect.height())
+                rs.setFloatUniform("radius", radius)
+                rs.setFloatUniform("band", Math.min(density * 20f, Math.min(rect.width(), rect.height()) * 0.4f))
+                rs.setFloatUniform("bend", density * 11f)
+                rs.setFloatUniform("frostAmt", 0.72f)
+                rs.setFloatUniform("dimAmt", src.dimAlpha / 255f)
+                rs.setFloatUniform("isDark", if (src.dark) 1f else 0f)
+                rs.setFloatUniform("px", density)
+                glassPaint.shader = rs
+                canvas.drawRect(rect, glassPaint)
+                return
+            } catch (e: Throwable) {
+                android.util.Log.w("Facet", "liquid glass draw", e)
+            }
+        }
+        if (o != null && o.width > 0) {
+            place(m, src.blurred, o, dx, dy)
+            frostShader.setLocalMatrix(m)
+            fill.shader = frostShader
             canvas.drawRoundRect(rect, radius, radius, fill)
         }
-        tint.color = if (src.dark) 0x33000000 else 0x4DFFFFFF
+        tint.color = if (src.dark) 0x29000000 else 0x55FFFFFF
         canvas.drawRoundRect(rect, radius, radius, tint)
-        // bright top edge, the "liquid" highlight
-        edge.shader = LinearGradient(0f, rect.top, 0f, rect.top + rect.height() * 0.55f,
-            if (src.dark) 0x30FFFFFF else 0x99FFFFFF.toInt(), 0x00FFFFFF, Shader.TileMode.CLAMP)
+        edge.shader = LinearGradient(0f, rect.top, 0f, rect.top + rect.height() * 0.65f,
+            if (src.dark) 0x38FFFFFF else 0x99FFFFFF.toInt(), 0x00FFFFFF, Shader.TileMode.CLAMP)
         canvas.drawRoundRect(rect, radius, radius, edge)
-        rim.color = if (src.dark) 0x40FFFFFF else 0xCCFFFFFF.toInt()
+        // a bright rim that fades across the pane, plus a faint inner rim, as in Prism's glass panels
+        rim.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
+            intArrayOf(if (src.dark) 0xB3FFFFFF.toInt() else 0xFFFFFFFF.toInt(), if (src.dark) 0x1FFFFFFF else 0x33FFFFFF,
+                if (src.dark) 0x66FFFFFF else 0xB3FFFFFF.toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         val half = rim.strokeWidth / 2f
         canvas.drawRoundRect(RectF(rect.left + half, rect.top + half, rect.right - half, rect.bottom - half), radius, radius, rim)
+        inner.color = if (src.dark) 0x14FFFFFF else 0x22000000
+        val i = density * 1.6f
+        canvas.drawRoundRect(RectF(rect.left + i, rect.top + i, rect.right - i, rect.bottom - i), radius - i, radius - i, inner)
     }
 
     override fun setAlpha(alpha: Int) {}

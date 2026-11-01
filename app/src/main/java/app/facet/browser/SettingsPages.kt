@@ -83,8 +83,8 @@ fun appearancePage(h: SettingsHost): View {
         b.choice("Paper Dark", null, p.theme == 2) { h.applyTheme(2) }
         b.choice("Paper AMOLED", "Pure black. Saves battery on OLED screens and gives the deepest contrast.", p.theme == 3) { h.applyTheme(3) }
         b.section("Display")
-        b.toggle("Full screen", "Hide the status bar so pages use the whole screen. Swipe down from the top edge to peek at it.", p.getBool("fullscreen_ui", true)) {
-            p.putBool("fullscreen_ui", it)
+        b.toggle("Immersive mode", "Hide the status and navigation bars too. Swipe in from an edge to bring them back.", p.getBool("immersive_ui", false)) {
+            p.putBool("immersive_ui", it)
             h.applySystemUi()
         }
         b.note("Facet always uses Prism Serif for headings and Prism Sans for text.")

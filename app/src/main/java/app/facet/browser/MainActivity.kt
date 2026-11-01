@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
@@ -75,6 +76,15 @@ class MainActivity : Activity() {
     private var settingsView: SettingsView? = null
 
     private var fullscreen = false
+    // Edge to edge, like Chrome: the status bar stays visible and the app draws behind both system bars,
+    // padding its own content by these insets.
+    private var insTop = 0
+    private var insNav = 0
+    private var insIme = 0
+    private var barFloating = false
+    private var homeGlass: GlassSource? = null
+    private lateinit var bottomStack: LinearLayout
+    private val overlayBase = HashMap<View, IntArray>()
     private var pendingAndroidPerm: GeckoSession.PermissionDelegate.Callback? = null
     private var pendingActivity: GeckoResult<Intent>? = null
     private var pendingFile: Pair<GeckoSession.PromptDelegate.FilePrompt, GeckoResult<GeckoSession.PromptDelegate.PromptResponse>>? = null
@@ -163,6 +173,7 @@ class MainActivity : Activity() {
             { finishOnboarding() }
         ))
         onboardView = v
+        v.setInsets(insTop, insNav)
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
@@ -355,8 +366,8 @@ class MainActivity : Activity() {
         return Palette.make(dark, HomeConfig(prefs).accent, prefs.theme == 3)
     }
 
-    @Suppress("DEPRECATION")
-    private fun fullUi(): Boolean = prefs.getBool("fullscreen_ui", true)
+    /** Immersive mode hides both system bars. Off by default: Facet sits edge to edge like Chrome instead. */
+    private fun fullUi(): Boolean = prefs.getBool("immersive_ui", false)
 
     private fun gestureNav(): Boolean = try {
         Settings.Secure.getInt(contentResolver, "navigation_mode", 0) == 2
@@ -367,27 +378,34 @@ class MainActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) return
-        if (fullscreen) hideSystemBars(true) else applySystemBars()
-    }
-
-    private fun applySystemBars() {
-        window.statusBarColor = c.bg
-        window.navigationBarColor = c.bg
-        window.setBackgroundDrawable(ColorDrawable(c.bg))
-        if (fullUi()) {
-            hideSystemBars(gestureNav())
-            return
-        }
-        if (Build.VERSION.SDK_INT >= 30) window.insetsController?.show(WindowInsets.Type.systemBars())
-        var flags = View.SYSTEM_UI_FLAG_VISIBLE
-        if (!c.dark) {
-            flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            if (Build.VERSION.SDK_INT >= 26) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
-        window.decorView.systemUiVisibility = flags
+        if (fullscreen) hideSystemBars(true) else if (fullUi()) hideSystemBars(gestureNav())
     }
 
     @Suppress("DEPRECATION")
+    private fun applySystemBars() {
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
+        window.setBackgroundDrawable(ColorDrawable(c.bg))
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            val ic = window.insetsController
+            if (ic != null) {
+                val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                ic.setSystemBarsAppearance(if (c.dark) 0 else light, light)
+                if (!fullUi()) ic.show(WindowInsets.Type.systemBars())
+            }
+        } else {
+            var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            if (!c.dark) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = flags
+        }
+        if (fullUi()) hideSystemBars(gestureNav())
+    }
+
     private fun hideSystemBars(hideNav: Boolean) {
         try { hideSystemBarsUnsafe(hideNav) } catch (e: Exception) { android.util.Log.w("Facet", "hide bars", e) }
     }
@@ -401,10 +419,89 @@ class MainActivity : Activity() {
             if (hideNav) types = types or WindowInsets.Type.navigationBars()
             ic.hide(types)
         } else {
-            var f = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            var f = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             if (hideNav) f = f or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
             window.decorView.systemUiVisibility = f
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readInsets(ins: WindowInsets) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val sys = ins.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            insTop = sys.top
+            insNav = ins.getInsets(WindowInsets.Type.navigationBars()).bottom
+            insIme = ins.getInsets(WindowInsets.Type.ime()).bottom
+        } else {
+            insTop = ins.systemWindowInsetTop
+            insNav = ins.stableInsetBottom
+            val all = ins.systemWindowInsetBottom
+            insIme = if (all > insNav + dp(40)) all else 0
+        }
+        if (fullscreen) { insTop = 0; insNav = 0 }
+    }
+
+    /** Lays the bottom bar, the page and any open overlays out around the system bars and the keyboard. */
+    private fun applyInsets() {
+        if (!::bottomStack.isInitialized) return
+        val kb = insIme > 0
+        val lp = bottomStack.layoutParams as FrameLayout.LayoutParams
+        if (barFloating) {
+            lp.leftMargin = dp(10)
+            lp.rightMargin = dp(10)
+            lp.bottomMargin = (if (kb) insIme else insNav) + dp(8)
+            bottomBar.setPadding(0, 0, 0, dp(4))
+        } else {
+            lp.leftMargin = 0
+            lp.rightMargin = 0
+            lp.bottomMargin = if (kb) insIme else 0
+            bottomBar.setPadding(0, 0, 0, if (kb) 0 else insNav)
+        }
+        bottomStack.layoutParams = lp
+        bottomStack.post { padContent() }
+        for ((v, base) in overlayBase) padOverlay(v, base)
+        onboardView?.setInsets(insTop, if (kb) insIme else insNav)
+        bottomBar.invalidate()
+    }
+
+    private fun barSpace(): Int {
+        if (!::bottomStack.isInitialized || bottomStack.visibility != View.VISIBLE) return if (insIme > 0) insIme else insNav
+        val lp = bottomStack.layoutParams as FrameLayout.LayoutParams
+        return bottomStack.height + lp.bottomMargin
+    }
+
+    private fun padContent() {
+        val home = contentHost.getChildAt(0) as? NewTabView
+        if (home != null) {
+            contentHost.setPadding(0, 0, 0, 0)
+            home.setInsets(insTop, barSpace() + dp(6))
+        } else if (fullscreen) {
+            contentHost.setPadding(0, 0, 0, 0)
+        } else {
+            contentHost.setPadding(0, insTop, 0, barSpace())
+        }
+    }
+
+    private fun padOverlay(v: View, base: IntArray) {
+        when (v) {
+            is MenuPopupView -> {}
+            is SheetView -> v.setBottomInset(insNav)
+            else -> v.setPadding(base[0], base[1] + insTop, base[2], base[3] + Math.max(insNav, insIme))
+        }
+    }
+
+    /** The home page with glass gets a floating liquid glass bottom bar; web pages get a solid, full-width one. */
+    private fun styleBar() {
+        if (!::bottomStack.isInitialized) return
+        val g = homeGlass
+        barFloating = g != null && current?.showsNewTab == true
+        if (barFloating && g != null) {
+            bottomBar.background = GlassDrawable(g, bottomBar, dpf(28f), resources.displayMetrics.density)
+        } else {
+            bottomBar.setBackgroundColor(c.bg)
+        }
+        applyInsets()
     }
 
     private fun buildUi() {
@@ -413,19 +510,24 @@ class MainActivity : Activity() {
         rootFrame = FrameLayout(this)
         rootFrame.setBackgroundColor(c.bg)
 
-        val column = LinearLayout(this)
-        column.orientation = LinearLayout.VERTICAL
-
         contentHost = FrameLayout(this)
         contentHost.isFocusableInTouchMode = true
-        column.addView(contentHost, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        contentHost.setBackgroundColor(c.bg)
+        rootFrame.addView(contentHost, FrameLayout.LayoutParams(MATCH, MATCH))
 
+        bottomStack = LinearLayout(this)
+        bottomStack.orientation = LinearLayout.VERTICAL
         progressLine = ProgressLine(this, c)
-        column.addView(progressLine, LinearLayout.LayoutParams(MATCH, dp(2)))
-
+        bottomStack.addView(progressLine, LinearLayout.LayoutParams(MATCH, dp(2)))
         bottomBar = buildBottomBar()
-        column.addView(bottomBar, LinearLayout.LayoutParams(MATCH, WRAP))
-        rootFrame.addView(column, FrameLayout.LayoutParams(MATCH, MATCH))
+        bottomStack.addView(bottomBar, LinearLayout.LayoutParams(MATCH, WRAP))
+        rootFrame.addView(bottomStack, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        bottomStack.addOnLayoutChangeListener { _, _, top, _, bottom, _, oTop, _, oBottom -> if (bottom - top != oBottom - oTop || top != oTop) padContent() }
+        rootFrame.setOnApplyWindowInsetsListener { _, ins ->
+            readInsets(ins)
+            applyInsets()
+            ins
+        }
         setContentView(rootFrame)
         // the window's insets controller only exists once the decor view is installed
         try { applySystemBars() } catch (e: Exception) { android.util.Log.w("Facet", "system bars", e) }
@@ -435,6 +537,7 @@ class MainActivity : Activity() {
     private fun rebuildUi() {
         contentHost.removeAllViews()
         overlays.clear()
+        overlayBase.clear()
         tabSwitcher = null
         settingsView = null
         buildUi()
@@ -687,8 +790,9 @@ class MainActivity : Activity() {
                     { newTab(null, true) }
                 ),
                 cfgHome, prefs,
-                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark, c.amoled)
+                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark, c.amoled).also { homeGlass = it.glass }
             )
+            if (t.isPrivate) homeGlass = null
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
             val s = ensureSession(t)
@@ -702,6 +806,7 @@ class MainActivity : Activity() {
                 s.loadUri(pending)
             }
         }
+        styleBar()
         refreshChrome()
     }
 
@@ -1151,9 +1256,10 @@ class MainActivity : Activity() {
 
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
-        bottomBar.visibility = if (on) View.GONE else View.VISIBLE
-        progressLine.visibility = if (on) View.GONE else View.VISIBLE
+        bottomStack.visibility = if (on) View.GONE else View.VISIBLE
         if (on) hideSystemBars(true) else applySystemBars()
+        rootFrame.requestApplyInsets()
+        padContent()
     }
 
     private fun startDownload(url: String, contentDisposition: String?, mime: String?) {
@@ -1199,6 +1305,8 @@ class MainActivity : Activity() {
     private fun showOverlay(v: View) {
         overlays.add(v)
         updateBackdrop()
+        overlayBase[v] = intArrayOf(v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom)
+        padOverlay(v, overlayBase[v]!!)
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         if (v !is SheetView) {
             v.alpha = 0f
@@ -1211,6 +1319,7 @@ class MainActivity : Activity() {
     private fun closeTopOverlay() {
         if (overlays.isEmpty()) return
         val v = overlays.removeAt(overlays.size - 1)
+        overlayBase.remove(v)
         updateBackdrop()
         if (v === tabSwitcher) tabSwitcher = null
         if (v === settingsView) settingsView = null
@@ -1235,6 +1344,7 @@ class MainActivity : Activity() {
             val me = holder[0]
             if (me != null && overlays.contains(me)) {
                 overlays.remove(me)
+                overlayBase.remove(me)
                 rootFrame.removeView(me)
                 updateBackdrop()
             }
@@ -1318,10 +1428,11 @@ class MainActivity : Activity() {
 
     private fun showMenuPopup(items: List<SheetItem>) {
         val holder = arrayOfNulls<MenuPopupView>(1)
-        val v = MenuPopupView(this, c, items, bottomBar.height) {
+        val v = MenuPopupView(this, c, items, barSpace()) {
             val me = holder[0]
             if (me != null && overlays.contains(me)) {
                 overlays.remove(me)
+                overlayBase.remove(me)
                 rootFrame.removeView(me)
                 updateBackdrop()
             }
@@ -1629,7 +1740,7 @@ class MainActivity : Activity() {
         }
         override fun openAiSettings() { showOverlay(aiPage(this)) }
         override fun openExtensions() { showOverlay(extensionsPage(this)) }
-        override fun applySystemUi() { applySystemBars() }
+        override fun applySystemUi() { applySystemBars(); rootFrame.requestApplyInsets() }
         override fun openHome() { showOverlay(homePage(this)) }
         override fun homeChanged() { if (current?.showsNewTab == true) showCurrent() }
         override fun pickWallpaper() { pickWallpaperImage() }
@@ -1718,12 +1829,15 @@ class MainActivity : Activity() {
             val me = holder[0]
             if (me != null && overlays.contains(me)) {
                 overlays.remove(me)
+                overlayBase.remove(me)
                 rootFrame.removeView(me)
                 updateBackdrop()
             }
         }
         holder[0] = v
         overlays.add(v)
+        overlayBase[v] = intArrayOf(v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom)
+        padOverlay(v, overlayBase[v]!!)
         rootFrame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 

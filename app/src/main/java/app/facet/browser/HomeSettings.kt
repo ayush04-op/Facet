@@ -110,7 +110,7 @@ object HomeLook {
             key = k
         }
         val view = WallpaperView(ctx, sharp!!, dim)
-        val src = if (cfg.glass) GlassSource(blurred!!, dark) else null
+        val src = if (cfg.glass) GlassSource(blurred!!, dark, sharp, dim) else null
         src?.origin = view
         return Look(view, src)
     }

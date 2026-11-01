@@ -40,6 +40,11 @@ class SheetView(
     private val scrim = View(ctx)
     private val card = LinearLayout(ctx)
 
+    /** Extends the card behind the navigation bar while keeping its rows above it. */
+    fun setBottomInset(px: Int) {
+        card.setPadding(card.paddingLeft, card.paddingTop, card.paddingRight, context.dp(12) + px)
+    }
+
     /** Slides the card down and fades the scrim, then runs [end]. Ignores repeat taps. */
     private fun animateOut(end: () -> Unit) {
         if (leaving) return

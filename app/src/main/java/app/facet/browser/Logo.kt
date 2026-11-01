@@ -25,14 +25,14 @@ class LogoView(context: Context, private val withGlow: Boolean = true) : View(co
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val spring = SpringInterpolator(0.28f, 0.55f)
+    private val spring = SpringInterpolator(0.15f, 0.6f)
     private fun load(id: Int): Bitmap = BitmapFactory.decodeResource(resources, id)
-    // dx/dy are the offsets (in logo widths) the piece starts from, rot the angle it starts at, from the delay
+    // every piece is part of one ring, so each one turns into place around the centre (rot = starting angle)
     private val pieces = listOf(
-        Piece(load(R.drawable.logo_teal), -0.55f, -0.25f, -70f, 0.00f, 0.7f),
-        Piece(load(R.drawable.logo_red), 0.55f, -0.30f, 70f, 0.10f, 0.7f),
-        Piece(load(R.drawable.logo_swirl), 0.0f, 0.55f, 40f, 0.22f, 0.8f),
-        Piece(load(R.drawable.logo_tip), 0.25f, -0.6f, 160f, 0.45f, 0.2f)
+        Piece(load(R.drawable.logo_teal), 0f, 0f, -110f, 0.00f, 0.86f),
+        Piece(load(R.drawable.logo_swirl), 0f, 0f, 90f, 0.12f, 0.86f),
+        Piece(load(R.drawable.logo_red), 0f, 0f, -80f, 0.24f, 0.86f),
+        Piece(load(R.drawable.logo_tip), 0f, 0f, 0f, 0.55f, 0.2f)
     )
     private var build = 0f
     private var sweep = -1f
@@ -86,7 +86,7 @@ class LogoView(context: Context, private val withGlow: Boolean = true) : View(co
         val sweeping = build >= 1f && sweep > -0.9f
         val layer = if (sweeping) canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null) else -1
         for (p in pieces) {
-            val local = ((build - p.from) / 0.55f).coerceIn(0f, 1f)
+            val local = ((build - p.from) / 0.5f).coerceIn(0f, 1f)
             if (local <= 0f) continue
             val e = spring.getInterpolation(local)
             val inv = 1f - e

@@ -398,3 +398,21 @@ class BentoCard(context: Context, private val c: Colors, private val glass: Glas
         canvas.drawPath(p, tick)
     }
 }
+
+
+/** Full physical screen height (including the system bars), for backgrounds that sit behind them. */
+@Suppress("DEPRECATION")
+fun screenHeightPx(ctx: Context): Int {
+    return try {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val wm = ctx.getSystemService(android.view.WindowManager::class.java)
+            wm.maximumWindowMetrics.bounds.height()
+        } else {
+            val dm = android.util.DisplayMetrics()
+            (ctx.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(dm)
+            dm.heightPixels
+        }
+    } catch (e: Exception) {
+        ctx.resources.displayMetrics.heightPixels
+    }
+}

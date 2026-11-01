@@ -79,6 +79,12 @@ class OnboardingView(
     private val handler = Handler(Looper.getMainLooper())
     private var step = startStep
     private val stage = FrameLayout(ctx)
+    private val col = LinearLayout(ctx)
+
+    /** Keeps the steps clear of the status bar and the navigation bar; the background still fills the screen. */
+    fun setInsets(top: Int, bottom: Int) {
+        col.setPadding(context.dp(22), context.dp(18) + top, context.dp(22), context.dp(18) + bottom)
+    }
     private val dots = LinearLayout(ctx)
     private val primary = TextView(ctx)
     private val back = TextView(ctx)
@@ -92,15 +98,14 @@ class OnboardingView(
         setBackgroundColor(c.bg)
         val dm = ctx.resources.displayMetrics
         val bg = FrameLayout(ctx)
-        val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, dm.heightPixels / 2), if (c.amoled) 0xB3 else 0)
-        bg.addView(wp, LayoutParams(MATCH, dm.heightPixels))
+        val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, screenHeightPx(ctx) / 2), if (c.amoled) 0xB3 else 0)
+        bg.addView(wp, LayoutParams(MATCH, screenHeightPx(ctx)))
         val aurora = AuroraView(ctx, c)
         aurora.alpha = 0.8f
-        bg.addView(aurora, LayoutParams(MATCH, dm.heightPixels))
-        bg.addView(FacetField(ctx, c.accent), LayoutParams(MATCH, dm.heightPixels))
+        bg.addView(aurora, LayoutParams(MATCH, screenHeightPx(ctx)))
+        bg.addView(FacetField(ctx, c.accent), LayoutParams(MATCH, screenHeightPx(ctx)))
         addView(bg, LayoutParams(MATCH, MATCH))
 
-        val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(ctx.dp(22), ctx.dp(18), ctx.dp(22), ctx.dp(18))
 

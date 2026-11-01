@@ -41,13 +41,21 @@ class NewTabView(
 ) : FrameLayout(ctx) {
 
     private val glass: GlassSource? = look?.glass
+    private val col = LinearLayout(ctx)
+
+    /** Keeps the content clear of the status bar at the top and the (floating) bottom bar below. */
+    fun setInsets(top: Int, bottom: Int) {
+        val t = context.dp(14) + top
+        val b = context.dp(10) + bottom
+        if (col.paddingTop != t || col.paddingBottom != b) col.setPadding(col.paddingLeft, t, col.paddingRight, b)
+    }
 
     init {
         setBackgroundColor(c.bg)
         // The background is laid out at full screen height and anchored to the top, so opening the keyboard
         // (which shrinks this page) never rescales or shifts it.
         val bgHost = FrameLayout(ctx)
-        val screenH = ctx.resources.displayMetrics.heightPixels
+        val screenH = screenHeightPx(ctx)
         if (look != null) bgHost.addView(look.wallpaper, LayoutParams(MATCH, screenH))
         if (look == null || cfg.aurora) {
             val aurora = AuroraView(ctx, c)
@@ -67,7 +75,6 @@ class NewTabView(
         scroll.isVerticalScrollBarEnabled = false
         scroll.overScrollMode = View.OVER_SCROLL_NEVER
         if (glass != null) scroll.setOnScrollChangeListener { _, _, _, _, _ -> glass.invalidateAll() }
-        val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(ctx.dp(20), ctx.dp(14), ctx.dp(20), ctx.dp(10))
 
