@@ -98,8 +98,12 @@ class OnboardingView(
         setBackgroundColor(c.bg)
         val dm = ctx.resources.displayMetrics
         val bg = FrameLayout(ctx)
-        val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, screenHeightPx(ctx) / 2), if (c.amoled) 0xB3 else 0)
-        bg.addView(wp, LayoutParams(MATCH, screenHeightPx(ctx)))
+        if (cfg.wallpaper != HomeConfig.PAPER) {
+            val wp = WallpaperView(ctx, Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, c.dark, dm.widthPixels / 2, screenHeightPx(ctx) / 2), if (c.amoled) 0xB3 else 0)
+            bg.addView(wp, LayoutParams(MATCH, screenHeightPx(ctx)))
+        } else {
+            bg.addView(GridBackground(ctx, c).also { it.alpha = 0.6f }, LayoutParams(MATCH, screenHeightPx(ctx)))
+        }
         val aurora = AuroraView(ctx, c)
         aurora.alpha = 0.8f
         bg.addView(aurora, LayoutParams(MATCH, screenHeightPx(ctx)))
@@ -503,7 +507,7 @@ class OnboardingView(
     private fun lookStep(): View {
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.addView(title("Make it yours", "Accent colour, wallpaper and glass. All of it can change later under Home page."))
+        col.addView(title("Make it yours", "Accent colour and background. All of it can change later under Home page."))
 
         col.addView(label("ACCENT"))
         val sw = LinearLayout(ctx)
@@ -521,9 +525,22 @@ class OnboardingView(
         col.addView(sw)
         reveal(sw, 150L)
 
-        col.addView(label("WALLPAPER"))
+        col.addView(label("BACKGROUND"))
         val wp = LinearLayout(ctx)
         wp.orientation = LinearLayout.HORIZONTAL
+        run {
+            // the plain Paper background comes first: it's the default
+            val sel = cfg.wallpaper == HomeConfig.PAPER
+            val frame = FrameLayout(ctx)
+            frame.background = shape(c.surface, ctx.dpf(16f), if (sel) c.accent else c.line, if (sel) ctx.dp(3) else ctx.dp(1))
+            val t = makeText(ctx, "Paper", 12f, c.ink, Fonts.sansMedium)
+            t.gravity = Gravity.CENTER
+            frame.addView(t, FrameLayout.LayoutParams(MATCH, MATCH))
+            frame.setOnClickListener { if (cfg.wallpaper != HomeConfig.PAPER) { cfg.wallpaper = HomeConfig.PAPER; HomeLook.forget(); hooks.retheme(4) } }
+            val lp = LinearLayout.LayoutParams(0, ctx.dp(96), 1f)
+            lp.rightMargin = ctx.dp(8)
+            wp.addView(frame, lp)
+        }
         for (i in Wallpapers.names.indices) {
             val sel = cfg.wallpaper == i
             val frame = FrameLayout(ctx)
@@ -565,7 +582,6 @@ class OnboardingView(
             r.setOnClickListener { sv.performClick() }
             box.addView(r, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        toggleRow("Liquid glass", "Frosted panels over your wallpaper", cfg.glass) { cfg.glass = it; HomeLook.forget() }
         toggleRow("Clock on the home page", "Time and date, big and calm", cfg.clock) { cfg.clock = it }
         col.addView(box)
         reveal(box, 300L)
@@ -599,7 +615,7 @@ class OnboardingView(
         line("Profile", profile + if (state.extras.isNotEmpty()) " + ${state.extras.size} more" else "")
         line("Search", Urls.engine(prefs.searchEngine).name)
         line("Theme", themeName)
-        line("Wallpaper", if (cfg.wallpaper == 9) "Your photo" else Wallpapers.names[cfg.wallpaper.coerceIn(0, Wallpapers.names.size - 1)])
+        line("Background", if (cfg.wallpaper == HomeConfig.PAPER) "Paper" else if (cfg.wallpaper == 9) "Your photo" else Wallpapers.names[cfg.wallpaper.coerceIn(0, Wallpapers.names.size - 1)])
         val slp = LinearLayout.LayoutParams(MATCH, WRAP)
         slp.topMargin = ctx.dp(26)
         box.addView(summary, slp)

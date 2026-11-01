@@ -41,42 +41,31 @@ adb logcat -c
 adb shell am start -n $PKG/.MainActivity
 shot 01-welcome 15
 step skip
-shot 02-home-auto 6
+shot 02-home 6
 frames home-idle
 scrollup; scrollup
-shot 03-home-auto-scrolled 3
-frames home-scroll-lite
+shot 03-home-scrolled 3
+frames home-scroll
 step menu
-shot 04-menu-auto 6
+shot 04-menu 6
 step back
 step settings
 shot 05-settings 4
 step appearance
 shot 06-appearance 3
 scrollup
-shot 06b-appearance-glass 3
+shot 06b-appearance-more 3
 step back
 step back
 
-# Full tier: live blur with the lens, web pages in a TextureView
-step glass-full
-sleep 3
-relaunch
-shot 07-home-full 12
-scrollup
-shot 08-home-full-scrolled 3
-frames home-scroll-full
-step menu
-shot 09-menu-full 6
-step back
 step web
-shot 10-web-full 25
+shot 07-web 25
 step menu
-shot 11-menu-over-web-full 6
+shot 08-menu-over-web 6
 step back
 
 pkill -f "adb logcat" 2>/dev/null
-report "---- log: Facet warnings, glass and crashes ----"
+report "---- log: Facet warnings and crashes ----"
 grep -E " Facet|FATAL|Fatal signal|E AndroidRuntime|glass|RenderThread|libhwui|DEBUG  :|backtrace" shots/logcat-full.txt | grep -v -E "uiautomator|ziparchive" | head -150 | tee -a shots/report.txt
 if grep -qE "FATAL EXCEPTION|Fatal signal" shots/logcat-full.txt; then report "RESULT: crashed"; else report "RESULT: no crash"; fi
 $A shell pidof $PKG >/dev/null && report "app still running" || report "app NOT running"

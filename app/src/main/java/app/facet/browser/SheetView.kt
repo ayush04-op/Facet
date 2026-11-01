@@ -40,11 +40,9 @@ class SheetView(
     private val scrim = View(ctx)
     private val card = LinearLayout(ctx)
 
-    /** Floats the inset card just above the navigation bar. */
+    /** Extends the card behind the navigation bar while keeping its rows above it. */
     fun setBottomInset(px: Int) {
-        val lp = card.layoutParams as? FrameLayout.LayoutParams ?: return
-        lp.bottomMargin = context.dp(10) + px
-        card.layoutParams = lp
+        card.setPadding(card.paddingLeft, card.paddingTop, card.paddingRight, context.dp(12) + px)
     }
 
     /** Slides the card down and fades the scrim, then runs [end]. Ignores repeat taps. */
@@ -52,7 +50,7 @@ class SheetView(
         if (leaving) return
         leaving = true
         scrim.animate().alpha(0f).setDuration(180L).start()
-        card.animate().translationY(card.height.toFloat() + (card.layoutParams as FrameLayout.LayoutParams).bottomMargin + 8f).setDuration(210L)
+        card.animate().translationY(card.height.toFloat() + 8f).setDuration(210L)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction { end() }.start()
     }
@@ -64,18 +62,12 @@ class SheetView(
         scrim.setOnClickListener { animateOut { onDismiss(); cancel() } }
         addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // Liquid Glass sheet: inset from the screen edges with a larger radius, so content peeks around it
-        val r = ctx.dpf(32f)
+        val r = ctx.dpf(28f)
         card.orientation = LinearLayout.VERTICAL
-        val backdrop = Backdrop.get()
-        if (backdrop != null) {
-            card.background = GlassDrawable(backdrop, card, r, ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg, Backdrop.live)
-        } else {
-            val bg = GradientDrawable()
-            bg.setColor(withAlpha(c.bg, 0xF2))
-            bg.cornerRadius = r
-            card.background = bg
-        }
+        val bg = GradientDrawable()
+        bg.setColor(c.bg)
+        bg.cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+        card.background = bg
         card.elevation = ctx.dpf(8f)
         card.isClickable = true
         card.setPadding(ctx.dp(8), ctx.dp(10), ctx.dp(8), ctx.dp(12))
@@ -123,13 +115,12 @@ class SheetView(
 
         val lp = FrameLayout.LayoutParams(MATCH, WRAP)
         lp.gravity = Gravity.BOTTOM
-        lp.setMargins(ctx.dp(10), 0, ctx.dp(10), ctx.dp(10))
         addView(card, lp)
 
         // Entrance: hidden until measured, then slide up while the scrim fades in.
         card.visibility = View.INVISIBLE
         card.post {
-            card.translationY = card.height.toFloat() + (card.layoutParams as FrameLayout.LayoutParams).bottomMargin
+            card.translationY = card.height.toFloat()
             card.visibility = View.VISIBLE
             card.animate().translationY(0f).setDuration(460L)
                 .setInterpolator(SpringInterpolator(0.2f, 0.5f)).start()

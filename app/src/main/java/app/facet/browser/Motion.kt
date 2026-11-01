@@ -13,14 +13,6 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.TextView
 
-/**
- * Ambient motion switch. On the Lite glass tier the home page holds still, so a screen nobody touches costs no
- * frames at all (live glass only re-renders when what's behind it actually changes).
- */
-object Ambient {
-    @Volatile var still = false
-}
-
 /** Soft colour blobs drifting slowly behind the page. Pure drawing, no images. */
 class AuroraView(context: Context, private val c: Colors) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -37,7 +29,6 @@ class AuroraView(context: Context, private val c: Colors) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (Ambient.still) return
         val a = ValueAnimator.ofFloat(0f, (Math.PI * 2).toFloat())
         a.duration = 26000L
         a.repeatCount = ValueAnimator.INFINITE
@@ -93,7 +84,7 @@ class ShimmerText(context: Context, private val base: Int, private val glow: Int
 
     /** One highlight sweep, then a rest before the next, so the text isn't redrawn all the time. */
     private fun sweep() {
-        if (!isAttachedToWindow || Ambient.still) return
+        if (!isAttachedToWindow) return
         val a = ValueAnimator.ofFloat(-1f, 1.6f)
         a.duration = 3600L
         a.interpolator = LinearInterpolator()

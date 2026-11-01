@@ -21,7 +21,6 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.provider.Settings
-import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.animation.ValueAnimator
 import android.view.View
@@ -63,7 +62,7 @@ class MainActivity : Activity() {
 
     private lateinit var geckoView: GeckoView
     private lateinit var rootFrame: FrameLayout
-    private lateinit var contentHost: GlassTarget
+    private lateinit var contentHost: FrameLayout
     private lateinit var bottomBar: LinearLayout
     private lateinit var progressLine: ProgressLine
     private lateinit var lockIcon: IconView
@@ -84,11 +83,7 @@ class MainActivity : Activity() {
     private var insNav = 0
     private var insIme = 0
     private var barFloating = false
-    private var homeGlass: GlassSource? = null
     private lateinit var bottomStack: LinearLayout
-    private lateinit var addrPill: LinearLayout
-    private lateinit var navLeft: LinearLayout
-    private lateinit var navRight: LinearLayout
     private val overlayBase = HashMap<View, IntArray>()
     private var pendingAndroidPerm: GeckoSession.PermissionDelegate.Callback? = null
     private var pendingActivity: GeckoResult<Intent>? = null
@@ -149,13 +144,7 @@ class MainActivity : Activity() {
             }
             res
         }
-        GlassTiers.detect(this, prefs.getInt("glass_tier", 0))
-        Ambient.still = GlassTiers.current == GlassTier.LITE
         geckoView = GeckoView(this)
-        // Full glass blurs web pages too, which needs the page in a TextureView (a SurfaceView can't be sampled).
-        if (GlassTiers.current == GlassTier.FULL) {
-            try { geckoView.setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) } catch (e: Throwable) { android.util.Log.w("Facet", "texture backend", e) }
-        }
 
         // Temporary workspaces never outlive the run they were made in.
         for (w in workspaces.all()) {
@@ -377,12 +366,6 @@ class MainActivity : Activity() {
         return Palette.make(dark, HomeConfig(prefs).accent, prefs.theme == 3)
     }
 
-    private fun highContrastText(): Boolean = try {
-        Settings.Secure.getInt(contentResolver, "high_text_contrast_enabled", 0) == 1
-    } catch (e: Exception) {
-        false
-    }
-
     /** Immersive mode hides both system bars. Off by default: Facet sits edge to edge like Chrome instead. */
     private fun fullUi(): Boolean = prefs.getBool("immersive_ui", false)
 
@@ -480,7 +463,6 @@ class MainActivity : Activity() {
         for ((v, base) in overlayBase) padOverlay(v, base)
         onboardView?.setInsets(insTop, if (kb) insIme else insNav)
         bottomBar.invalidate()
-        if (::addrPill.isInitialized) { addrPill.invalidate(); navLeft.invalidate(); navRight.invalidate() }
     }
 
     private fun barSpace(): Int {
@@ -509,98 +491,21 @@ class MainActivity : Activity() {
         }
     }
 
-    /** The glass backdrop for whatever is on screen: the home wallpaper, or the plain page colour. */
-    private fun currentBackdrop(): GlassSource {
-        val g = homeGlass
-        if (g != null && current?.showsNewTab == true) return g
-        return GlassSource.plain(c.bg, c.dark)
-    }
-
-    /** Whether menus and sheets can blur the live content right now (web pages need the TextureView backend). */
-    private fun liveBackdrop(): Boolean {
-        val tier = GlassTiers.current
-        if (tier == GlassTier.BASIC || GlassPrefs.reduceTransparency) return false
-        val home = current?.showsNewTab == true
-        return home || tier == GlassTier.FULL
-    }
-
-    /** Captures the page once (GeckoView can render it to a bitmap) so a menu or sheet can refract it. */
-    private fun withBackdrop(then: (GlassSource) -> Unit) {
-        if (liveBackdrop()) {
-            val src = currentBackdrop()
-            Backdrop.set(src, false, true)
-            then(src)
-            return
-        }
-        val t = current
-        if (t == null || t.showsNewTab || fullscreen || geckoView.parent == null) {
-            val src = currentBackdrop()
-            Backdrop.set(src, false, false)
-            then(src)
-            return
-        }
-        var done = false
-        val finish = { src: GlassSource ->
-            if (!done) {
-                done = true
-                Backdrop.set(src, true, false)
-                then(src)
-            }
-        }
-        val fallback = Runnable { finish(GlassSource.plain(c.bg, c.dark)) }
-        rootFrame.postDelayed(fallback, 350L)
-        try {
-            geckoView.capturePixels().accept({ bmp ->
-                rootFrame.post {
-                    rootFrame.removeCallbacks(fallback)
-                    finish(if (bmp != null) snapshotSource(bmp) else GlassSource.plain(c.bg, c.dark))
-                }
-            }, { _ -> rootFrame.post { rootFrame.removeCallbacks(fallback); finish(GlassSource.plain(c.bg, c.dark)) } })
-        } catch (e: Throwable) {
-            rootFrame.removeCallbacks(fallback)
-            finish(GlassSource.plain(c.bg, c.dark))
-        }
-    }
-
-    private fun snapshotSource(bmp: android.graphics.Bitmap): GlassSource {
-        return try {
-            val sw = Math.max(1, bmp.width / 2)
-            val sh = Math.max(1, bmp.height / 2)
-            val sharp = android.graphics.Bitmap.createScaledBitmap(bmp, sw, sh, true)
-            val src = GlassSource(Wallpapers.blurred(sharp, 1), c.dark, sharp, 0)
-            src.origin = geckoView
-            src
-        } catch (e: Throwable) {
-            GlassSource.plain(c.bg, c.dark)
-        }
-    }
-
-    /**
-     * The toolbar floats on the Liquid Glass layer: the address capsule and two grouped button capsules, inset
-     * from the screen edges. Over the home page they refract the wallpaper; over web pages, the page colour.
-     */
+    /** The toolbar: a solid Paper bar that runs behind the navigation bar, edge to edge like Chrome. */
     private fun styleBar() {
         if (!::bottomStack.isInitialized) return
-        barFloating = true
-        val src = currentBackdrop()
-        val d = resources.displayMetrics.density
-        val live = GlassTiers.current != GlassTier.BASIC
-        bottomBar.background = null
-        addrPill.background = GlassDrawable(src, addrPill, dpf(26f), d, GlassKind.NAV, c.bg, live)
-        navLeft.background = GlassDrawable(src, navLeft, dpf(26f), d, GlassKind.NAV, c.bg, live)
-        navRight.background = GlassDrawable(src, navRight, dpf(26f), d, GlassKind.NAV, c.bg, live)
+        barFloating = false
+        bottomBar.setBackgroundColor(c.bg)
         applyInsets()
     }
 
     private fun buildUi() {
         c = resolveColors()
-        GlassPrefs.reduceTransparency = prefs.getBool("reduce_transparency", false) || highContrastText()
 
         rootFrame = FrameLayout(this)
         rootFrame.setBackgroundColor(c.bg)
 
-        contentHost = GlassTarget(this)
-        LiveGlass.target = contentHost
+        contentHost = FrameLayout(this)
         contentHost.isFocusableInTouchMode = true
         contentHost.setBackgroundColor(c.bg)
         rootFrame.addView(contentHost, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -655,7 +560,7 @@ class MainActivity : Activity() {
         pill.gravity = Gravity.CENTER_VERTICAL
         pill.background = shape(c.glass, dpf(26f), c.glassEdge, dp(1))
         pill.setPadding(dp(16), 0, dp(4), 0)
-        addrPill = pill
+        pill.elevation = dpf(2f)
 
         lockIcon = IconView(this, Icon.SEARCH, c.muted, 18)
         lockIcon.setOnClickListener { showSiteInfo() }
@@ -701,7 +606,7 @@ class MainActivity : Activity() {
         pill.addView(reload.first, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         val pillLp = LinearLayout.LayoutParams(MATCH, dp(52))
-        pillLp.setMargins(0, dp(6), 0, dp(8))
+        pillLp.setMargins(dp(12), dp(8), dp(12), dp(2))
         bar.addView(pill, pillLp)
 
         // Navigation row
@@ -718,26 +623,14 @@ class MainActivity : Activity() {
         tabsIcon = tabsBtn.second
         val menu = iconButton(Icon.MENU, 48, 24) { showMenu() }
 
-        // Toolbar items grouped by what they do, each group on its own glass capsule (Liquid Glass guidance):
-        // history on the left, tabs and the menu on the right.
-        navLeft = LinearLayout(this)
-        navLeft.orientation = LinearLayout.HORIZONTAL
-        navLeft.gravity = Gravity.CENTER_VERTICAL
-        navLeft.setPadding(dp(4), 0, dp(4), 0)
-        for (b in listOf(back.first, fwd.first)) navLeft.addView(b, LinearLayout.LayoutParams(dp(52), dp(48)))
-        navRight = LinearLayout(this)
-        navRight.orientation = LinearLayout.HORIZONTAL
-        navRight.gravity = Gravity.CENTER_VERTICAL
-        navRight.setPadding(dp(4), 0, dp(4), 0)
-        for (b in listOf(add.first, tabsBtn.first, menu.first)) navRight.addView(b, LinearLayout.LayoutParams(dp(52), dp(48)))
         back.first.contentDescription = "Back"
         fwd.first.contentDescription = "Forward"
         add.first.contentDescription = "New tab"
         tabsBtn.first.contentDescription = "Tabs"
         menu.first.contentDescription = "Menu"
-        nav.addView(navLeft, LinearLayout.LayoutParams(WRAP, dp(52)))
-        nav.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        nav.addView(navRight, LinearLayout.LayoutParams(WRAP, dp(52)))
+        for (b in listOf(back.first, fwd.first, add.first, tabsBtn.first, menu.first)) {
+            nav.addView(b, LinearLayout.LayoutParams(0, dp(48), 1f))
+        }
         bar.addView(nav, LinearLayout.LayoutParams(MATCH, dp(52)))
         return bar
     }
@@ -898,9 +791,8 @@ class MainActivity : Activity() {
                     { newTab(null, true) }
                 ),
                 cfgHome, prefs,
-                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark, c.amoled).also { homeGlass = it.glass }
+                if (t.isPrivate) null else HomeLook.build(this, cfgHome, c.dark, c.amoled)
             )
-            if (t.isPrivate) homeGlass = null
             contentHost.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
         } else {
             val s = ensureSession(t)
@@ -914,7 +806,6 @@ class MainActivity : Activity() {
                 s.loadUri(pending)
             }
         }
-        Backdrop.set(currentBackdrop(), false, liveBackdrop())
         styleBar()
         refreshChrome()
     }
@@ -1013,8 +904,6 @@ class MainActivity : Activity() {
             "back" -> onBackPressed()
             "web" -> navigate("https://example.com")
             "tabs" -> showTabSwitcher()
-            "glass-full" -> prefs.putInt("glass_tier", 1)
-            "glass-lite" -> prefs.putInt("glass_tier", 2)
         }
     }
 
@@ -1410,29 +1299,8 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- overlays
 
-    private var blurAnim: ValueAnimator? = null
-    private var blurNow = 0f
-
-    /** Frosts the home page behind menus and sheets (Android 12+). Web pages are drawn by the engine and stay as they are. */
-    private fun updateBackdrop() {
-        if (Build.VERSION.SDK_INT < 31) return
-        val want = overlays.isNotEmpty() && current?.showsNewTab == true && HomeConfig(prefs).glass && GlassTiers.current == GlassTier.FULL
-        val target = if (want) 26f else 0f
-        if (target == blurNow) return
-        blurAnim?.cancel()
-        val a = ValueAnimator.ofFloat(blurNow, target)
-        a.duration = 240L
-        a.addUpdateListener {
-            blurNow = it.animatedValue as Float
-            try {
-                contentHost.setRenderEffect(if (blurNow < 0.5f) null else RenderEffect.createBlurEffect(blurNow, blurNow, Shader.TileMode.CLAMP))
-            } catch (e: Exception) {
-                a.cancel()
-            }
-        }
-        a.start()
-        blurAnim = a
-    }
+    /** Kept as a hook for overlays; the Paper look doesn't blur the page behind them. */
+    private fun updateBackdrop() {}
 
     private fun showOverlay(v: View) {
         overlays.add(v)
@@ -1587,7 +1455,7 @@ class MainActivity : Activity() {
         items.add(SheetItem(Icon.DOWNLOAD, "Downloads") { host.openDownloads() })
         items.add(SheetItem(Icon.GRID, "Extensions") { showExtensionsSheet() })
         items.add(SheetItem(Icon.SETTINGS, "Settings") { showSettings() })
-        withBackdrop { showMenuPopup(items) }
+        showMenuPopup(items)
     }
 
     private fun showMenuPopup(items: List<SheetItem>) {

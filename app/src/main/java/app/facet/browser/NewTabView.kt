@@ -40,20 +40,13 @@ class NewTabView(
     private val look: HomeLook.Look?
 ) : FrameLayout(ctx) {
 
-    private val glass: GlassSource? = look?.glass
     private val col = LinearLayout(ctx)
-    private val topFade: EdgeFadeView? = glass?.let { EdgeFadeView(ctx, it, true) }
-    // with live glass the toolbar itself blurs what scrolls beneath it, so only the basic tier needs the fade
-    private val bottomFade: EdgeFadeView? = if (GlassTiers.current == GlassTier.BASIC) glass?.let { EdgeFadeView(ctx, it, false) } else null
 
-    /** Keeps the content clear of the status bar at the top and the floating toolbar below. */
+    /** Keeps the content clear of the status bar at the top and the toolbar below. */
     fun setInsets(top: Int, bottom: Int) {
         val t = context.dp(14) + top
         val b = context.dp(10) + bottom
         if (col.paddingTop != t || col.paddingBottom != b) col.setPadding(col.paddingLeft, t, col.paddingRight, b)
-        // scroll edge effect: content fades into frosted glass under the status bar and under the toolbar
-        topFade?.let { f -> val h = top + context.dp(18); if (f.layoutParams.height != h) f.layoutParams = f.layoutParams.also { it.height = h } }
-        bottomFade?.let { f -> val h = bottom + context.dp(12); if (f.layoutParams.height != h) f.layoutParams = f.layoutParams.also { it.height = h } }
     }
 
     init {
@@ -80,7 +73,6 @@ class NewTabView(
         val scroll = ScrollView(ctx)
         scroll.isVerticalScrollBarEnabled = false
         scroll.overScrollMode = View.OVER_SCROLL_NEVER
-        if (glass != null) scroll.setOnScrollChangeListener { _, _, _, _, _ -> glass.invalidateAll() }
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(ctx.dp(20), ctx.dp(14), ctx.dp(20), ctx.dp(10))
 
@@ -145,7 +137,7 @@ class NewTabView(
             if (cfg.stats) col.addView(row, rlp)
 
             if (reminderCount > 0) {
-                val rem = BentoCard(ctx, c, glass)
+                val rem = BentoCard(ctx, c)
                 rem.addView(makeTag(ctx, "Permission reminder", c.accent))
                 val t = makeText(
                     ctx,
@@ -187,7 +179,7 @@ class NewTabView(
             col.addView(acts, alp)
 
             // bookmarks
-            val bm = BentoCard(ctx, c, glass)
+            val bm = BentoCard(ctx, c)
             bm.addView(makeTag(ctx, "Bookmarks · ${workspace.name}", c.muted))
             if (bookmarks.isEmpty()) {
                 val empty = makeText(ctx, "Bookmark a page from the menu and it will live here.", 15f, c.muted, Fonts.sans)
@@ -224,8 +216,6 @@ class NewTabView(
         }
         scroll.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, MATCH))
-        topFade?.let { addView(it, LayoutParams(MATCH, 0, Gravity.TOP)) }
-        bottomFade?.let { addView(it, LayoutParams(MATCH, 0, Gravity.BOTTOM)) }
     }
 
     private fun greetingFor(name: String): String {
@@ -287,7 +277,6 @@ class NewTabView(
         row.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(14), ctx.dp(8))
         val fg = if (strong) 0xFFFFFFFF.toInt() else c.ink
         val bg: android.graphics.drawable.Drawable = if (strong) shape(c.accent, ctx.dpf(22f))
-        else if (glass != null) GlassDrawable(glass, row, ctx.dpf(22f), ctx.resources.displayMetrics.density)
         else shape(withAlpha(c.surface, 0xE6), ctx.dpf(22f), c.line, ctx.dp(1))
         row.pressable(bg, withAlpha(fg, 0x33), ctx.dpf(22f))
         row.addView(IconView(ctx, icon, fg, 17), LinearLayout.LayoutParams(ctx.dp(17), ctx.dp(17)))
@@ -304,7 +293,7 @@ class NewTabView(
     }
 
     private fun action(ctx: Context, icon: Icon, title: String, sub: String, onClick: () -> Unit): View {
-        val card = BentoCard(ctx, c, glass)
+        val card = BentoCard(ctx, c)
         card.pressable(card.background, withAlpha(c.ink, 0x14), ctx.dpf(18f))
         card.setOnClickListener { onClick() }
         card.pressScale(0.96f)
@@ -321,7 +310,7 @@ class NewTabView(
     }
 
     private fun statCard(ctx: Context, label: String, value: Long, caption: String, pulse: Boolean): BentoCard {
-        val card = BentoCard(ctx, c, glass)
+        val card = BentoCard(ctx, c)
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL

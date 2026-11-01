@@ -10,20 +10,20 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Everything the person can change about the home page and the glass look. All stored on the device. */
+/** Everything the person can change about the home page. All stored on the device. */
 class HomeConfig(private val p: Prefs) {
-    var glass: Boolean
-        get() = p.getBool("glass_on", true)
-        set(v) = p.putBool("glass_on", v)
+    companion object { const val PAPER = 8 }
 
-    /** 0 soft, 1 medium, 2 strong */
-    var blur: Int
-        get() = p.getInt("glass_blur", 1)
-        set(v) = p.putInt("glass_blur", v)
-
-    /** 0..4 generated, 9 = the person's own photo */
+    /** [PAPER] = the plain Paper background (the default), 0..4 generated wallpapers, 9 = the person's own photo */
     var wallpaper: Int
-        get() = p.getInt("wp_kind", 0)
+        get() {
+            // the Paper background became the default when the glass look was retired; move everyone back once
+            if (!p.getBool("paper_home_v2", false)) {
+                p.putBool("paper_home_v2", true)
+                if (p.getInt("wp_kind", PAPER) != 9) p.putInt("wp_kind", PAPER)
+            }
+            return p.getInt("wp_kind", PAPER)
+        }
         set(v) = p.putInt("wp_kind", v)
 
     /** 0 none, 1 light, 2 medium, 3 strong */
@@ -84,38 +84,32 @@ class HomeConfig(private val p: Prefs) {
     val dimAlpha: Int get() = when (dim) { 1 -> 0x26; 2 -> 0x4D; 3 -> 0x80; else -> 0 }
 }
 
-/** Wallpaper and glass source for the home page. Decoded once and reused until a setting changes. */
+/** The home wallpaper, when one is chosen. Decoded once and reused until a setting changes. */
 object HomeLook {
     private var key = ""
     private var sharp: Bitmap? = null
-    private var blurred: Bitmap? = null
 
-    class Look(val wallpaper: WallpaperView, val glass: GlassSource?)
+    class Look(val wallpaper: WallpaperView)
 
-    fun build(ctx: Context, cfg: HomeConfig, dark: Boolean, amoled: Boolean = false): Look {
+    /** Null for the plain Paper background. */
+    fun build(ctx: Context, cfg: HomeConfig, dark: Boolean, amoled: Boolean = false): Look? {
+        if (cfg.wallpaper == HomeConfig.PAPER) return null
         val dm = ctx.resources.displayMetrics
         // Decode at about half the screen: plenty for a background and cheap to keep.
         val w = dm.widthPixels / 2
         val h = dm.heightPixels / 2
         val dim = if (amoled) Math.max(cfg.dimAlpha, 0xB3) else cfg.dimAlpha
-        val k = "${cfg.wallpaper}/$dark/${cfg.blur}/${cfg.customStamp}/$w/$h/$dim"
+        val k = "${cfg.wallpaper}/$dark/${cfg.customStamp}/$w/$h"
         if (k != key || sharp == null) {
             var s: Bitmap? = if (cfg.wallpaper == 9) Wallpapers.custom(ctx) else null
             if (s == null) s = Wallpapers.preset(if (cfg.wallpaper == 9) 0 else cfg.wallpaper, dark, w, h)
             sharp = s
-            val soft = Wallpapers.blurred(s, cfg.blur)
-            // the glass must see the same dimming as the wallpaper itself
-            if (dim > 0) android.graphics.Canvas(soft).drawColor(withAlpha(0x000000, dim))
-            blurred = soft
             key = k
         }
-        val view = WallpaperView(ctx, sharp!!, dim)
-        val src = if (cfg.glass) GlassSource(blurred!!, dark, sharp, dim) else null
-        src?.origin = view
-        return Look(view, src)
+        return Look(WallpaperView(ctx, sharp!!, dim))
     }
 
-    fun forget() { key = ""; sharp = null; blurred = null }
+    fun forget() { key = ""; sharp = null }
 }
 
 // ---------------------------------------------------------------- weather (opt-in, Open-Meteo)
@@ -206,18 +200,12 @@ fun homePage(h: SettingsHost): View {
     lateinit var view: PageView
     fun changed() { h.homeChanged(); view.refresh() }
     view = PageView(h.context, h.colors, "Home page", { h.back() }) { b ->
-        b.section("Look")
-        b.toggle("Liquid glass", "Frosted, see-through panels over your wallpaper", cfg.glass) { cfg.glass = it; HomeLook.forget(); changed() }
-        if (cfg.glass) {
-            b.choice("Soft blur", null, cfg.blur == 0) { cfg.blur = 0; HomeLook.forget(); changed() }
-            b.choice("Medium blur", null, cfg.blur == 1) { cfg.blur = 1; HomeLook.forget(); changed() }
-            b.choice("Strong blur", null, cfg.blur == 2) { cfg.blur = 2; HomeLook.forget(); changed() }
-        }
         b.section("Accent colour")
         for ((i, a) in Palette.accents.withIndex()) {
             b.choice(a.name, null, cfg.accent == i) { cfg.accent = i; h.applyTheme(h.prefs.theme) }
         }
-        b.section("Wallpaper")
+        b.section("Background")
+        b.choice("Paper", "The plain Paper background with its soft grid", cfg.wallpaper == HomeConfig.PAPER) { cfg.wallpaper = HomeConfig.PAPER; HomeLook.forget(); changed() }
         for ((i, n) in Wallpapers.names.withIndex()) {
             b.choice(n, null, cfg.wallpaper == i) { cfg.wallpaper = i; HomeLook.forget(); changed() }
         }
