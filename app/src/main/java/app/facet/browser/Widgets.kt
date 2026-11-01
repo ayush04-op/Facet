@@ -365,38 +365,15 @@ class ProgressLine(context: Context, private val c: Colors) : View(context) {
     }
 }
 
-/** A bento card with bounding-box corner ticks. */
+/** A bento card: a soft Paper surface with a hairline border. */
 class BentoCard(context: Context, private val c: Colors) : LinearLayout(context) {
-    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = c.accent
-        style = Paint.Style.STROKE
-        strokeWidth = context.dpf(1.4f)
-        strokeCap = Paint.Cap.SQUARE
-    }
-
     init {
         orientation = LinearLayout.VERTICAL
         background = shape(c.surface, context.dpf(18f), c.line, context.dp(1))
         val p = context.dp(16)
         setPadding(p, p, p, p)
-        setWillNotDraw(false)
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val i = context.dpf(8f)
-        val s = context.dpf(7f)
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val p = Path()
-        p.moveTo(i, i + s); p.lineTo(i, i); p.lineTo(i + s, i)
-        p.moveTo(w - i - s, i); p.lineTo(w - i, i); p.lineTo(w - i, i + s)
-        p.moveTo(i, h - i - s); p.lineTo(i, h - i); p.lineTo(i + s, h - i)
-        p.moveTo(w - i - s, h - i); p.lineTo(w - i, h - i); p.lineTo(w - i, h - i - s)
-        canvas.drawPath(p, tick)
     }
 }
-
 
 /** Full physical screen height (including the system bars), for backgrounds that sit behind them. */
 @Suppress("DEPRECATION")
