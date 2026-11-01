@@ -1,8 +1,10 @@
 name: UI check
 
-# Manual only: builds Facet for the x86_64 emulator, runs it on Android 14 and takes screenshots of the welcome
+# Runs when this commit is pushed to the `ui-check` branch: builds Facet for the x86_64 emulator, runs it on Android 14 and takes screenshots of the welcome
 # screen, home page, menu, a settings page and a web page. The screenshots are pushed to the `ui-shots` branch.
 on:
+  push:
+    branches: [ui-check]
   workflow_dispatch:
 
 permissions:
