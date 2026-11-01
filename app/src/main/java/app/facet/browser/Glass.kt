@@ -245,7 +245,7 @@ enum class GlassKind(val tintLight: Float, val tintDark: Float, val bendDp: Floa
     /** Toolbar capsules and chips: clear enough for the backdrop to shine through. */
     NAV(0.30f, 0.22f, 12f, 1.4f, 1f, 0.70f),
     /** Menus and sheets: more tint, so rows of text stay legible over anything. */
-    MENU(0.62f, 0.52f, 14f, 1.2f, 0.9f, 0.85f),
+    MENU(0.70f, 0.74f, 14f, 1.2f, 0.9f, 0.85f),
     /** Content cards: frosted, a soft edge, no lensing. */
     CLEAR(0.18f, 0.14f, 3f, 0f, 0.45f, 0.80f)
 }

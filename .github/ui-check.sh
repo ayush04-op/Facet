@@ -43,6 +43,8 @@ step skip
 shot 02-home 6
 step menu
 shot 03-menu 3
+shot 03b-menu-later 6
+adb shell dumpsys activity top > shots/home-menu-views.txt 2>&1
 step back
 shot 04-menu-closed 2
 step settings
