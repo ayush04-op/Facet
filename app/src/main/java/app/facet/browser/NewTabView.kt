@@ -167,6 +167,7 @@ class NewTabView(
             // quick actions: four compact tiles in one row
             val acts = LinearLayout(ctx)
             acts.orientation = LinearLayout.HORIZONTAL
+            acts.isBaselineAligned = false
             val tiles = listOf(
                 Triple(Icon.NOTE, "Research") { a.onResearch() },
                 Triple(Icon.DOWNLOAD, "Downloads") { a.onDownloads() },
@@ -174,7 +175,8 @@ class NewTabView(
                 Triple(Icon.COMMAND, "Command bar") { a.onCommand() }
             )
             for ((i, tile) in tiles.withIndex()) {
-                val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+                // MATCH height: every tile grows to the tallest one, so a two-line label keeps the row even
+                val lp = LinearLayout.LayoutParams(0, MATCH, 1f)
                 if (i > 0) lp.leftMargin = ctx.dp(8)
                 acts.addView(actionTile(ctx, tile.first, tile.second, tile.third), lp)
             }
@@ -301,7 +303,7 @@ class NewTabView(
     private fun actionTile(ctx: Context, icon: Icon, title: String, onClick: () -> Unit): View {
         val card = BentoCard(ctx, c)
         card.setPadding(ctx.dp(6), ctx.dp(14), ctx.dp(6), ctx.dp(12))
-        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.gravity = Gravity.CENTER
         card.pressable(card.background, withAlpha(c.ink, 0x14), ctx.dpf(18f))
         card.setOnClickListener { onClick() }
         card.pressScale(0.94f)
