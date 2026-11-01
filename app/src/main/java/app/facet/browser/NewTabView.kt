@@ -41,12 +41,17 @@ class NewTabView(
 ) : FrameLayout(ctx) {
 
     private val col = LinearLayout(ctx)
+    // a Paper strip behind the status bar, so scrolled content never runs into the clock and icons
+    private val statusScrim = View(ctx).apply { setBackgroundColor(withAlpha(c.bg, 0xF2)) }
 
     /** Keeps the content clear of the status bar at the top and the toolbar below. */
     fun setInsets(top: Int, bottom: Int) {
         val t = context.dp(14) + top
         val b = context.dp(10) + bottom
         if (col.paddingTop != t || col.paddingBottom != b) col.setPadding(col.paddingLeft, t, col.paddingRight, b)
+        if (statusScrim.layoutParams != null && statusScrim.layoutParams.height != top) {
+            statusScrim.layoutParams = statusScrim.layoutParams.also { it.height = top }
+        }
     }
 
     init {
@@ -216,6 +221,7 @@ class NewTabView(
         }
         scroll.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, MATCH))
+        addView(statusScrim, LayoutParams(MATCH, 0, Gravity.TOP))
     }
 
     private fun greetingFor(name: String): String {
