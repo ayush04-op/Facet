@@ -38,7 +38,7 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Optional AI assistant**: off by default, uses your own key, never runs in private tabs
 - **Extensions**: browse Mozilla's add-ons, add from a file, or try a Chrome Web Store link; popups, options pages and a private-tab switch per extension
 - **Paper AMOLED**: pure-black theme for OLED screens, alongside Paper and Paper Dark
-- **Liquid glass** that refracts the wallpaper at its edges (Android 13+), a floating glass toolbar on the home page, your own **wallpaper**, an optional **clock and weather**, and accent colours, all under Settings, Home page
+- **Liquid glass** with a real, live blur of whatever is behind it (Android 12+), a refraction lens on Android 13+, and lighter tiers chosen automatically for budget phones; a floating glass toolbar, your own **wallpaper**, an optional **clock and weather**, and accent colours, all under Settings, Home page
 - Upgraded animations
 - **Edge to edge** like Chrome: the status bar stays, pages run behind a transparent navigation bar; optional immersive mode
 - **Animated welcome** for first-time users, then quick choices: profile name, search engine, theme, accent and wallpaper

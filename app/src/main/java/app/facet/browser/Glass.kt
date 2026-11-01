@@ -253,8 +253,156 @@ enum class GlassKind(val tintLight: Float, val tintDark: Float, val bendDp: Floa
 /** What menus and sheets refract: the home wallpaper, a snapshot of the current page, or its plain colour. */
 object Backdrop {
     @Volatile private var src: GlassSource? = null
-    fun set(s: GlassSource, snapshot: Boolean) { src = s }
+    /** True when menus and sheets should blur the live content instead of [src]. */
+    @Volatile var live = false
+        private set
+    fun set(s: GlassSource, snapshot: Boolean, live: Boolean) { src = s; this.live = live }
     fun get(): GlassSource? = src
+}
+
+/**
+ * How much glass the device gets. Picked automatically from the Android version and the phone's memory, or
+ * chosen in Settings, Appearance:
+ *  - FULL: live blur of whatever is behind the glass plus the refraction lens (Android 13+, capable phones).
+ *    Web pages render through a TextureView so menus can blur them too.
+ *  - LITE: live blur at a lower resolution, no lens, web pages stay on the faster SurfaceView (Android 12+ or
+ *    low-memory phones). Still smooth on budget hardware: the blur runs on the GPU over a few small tiles.
+ *  - BASIC: frosted glass from a pre-blurred wallpaper, no per-frame work at all (Android 11 and older).
+ */
+enum class GlassTier { BASIC, LITE, FULL }
+
+object GlassTiers {
+    @Volatile var current = GlassTier.BASIC
+
+    /** Sets [current] from [choice]; called once at start-up, since web pages pick their view type then. */
+    fun detect(ctx: Context, choice: Int): GlassTier {
+        val t = compute(ctx, choice)
+        current = t
+        return t
+    }
+
+    /** [choice]: 0 automatic, 1 full, 2 lite, 3 basic. Doesn't change anything. */
+    fun compute(ctx: Context, choice: Int): GlassTier {
+        val sdk = android.os.Build.VERSION.SDK_INT
+        val best = when {
+            sdk >= 33 -> GlassTier.FULL
+            sdk >= 31 -> GlassTier.LITE
+            else -> GlassTier.BASIC
+        }
+        val auto = if (best == GlassTier.FULL && lowEnd(ctx)) GlassTier.LITE else best
+        val picked = when (choice) {
+            1 -> best
+            2 -> if (best == GlassTier.BASIC) GlassTier.BASIC else GlassTier.LITE
+            3 -> GlassTier.BASIC
+            else -> auto
+        }
+        return picked
+    }
+
+    fun lowEnd(ctx: Context): Boolean {
+        return try {
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo()
+            am.getMemoryInfo(mi)
+            am.isLowRamDevice || mi.totalMem < 4L * 1024 * 1024 * 1024 || Runtime.getRuntime().availableProcessors() <= 4
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun label(t: GlassTier): String = when (t) {
+        GlassTier.FULL -> "Full: live blur and lens"
+        GlassTier.LITE -> "Lite: live blur"
+        GlassTier.BASIC -> "Basic: frosted"
+    }
+}
+
+/**
+ * The content layer that glass can see through. It records its children into one RenderNode and draws that;
+ * glass panes draw a reference to the same node through a blur, so the live content (scrolling cards, the
+ * web page) shows up blurred behind them. Because they hold a reference, updates reach the glass on the
+ * render thread without re-recording anything: a still screen costs nothing.
+ */
+class GlassTarget(ctx: Context) : android.widget.FrameLayout(ctx) {
+    val node: android.graphics.RenderNode? = if (android.os.Build.VERSION.SDK_INT >= 31) android.graphics.RenderNode("facet-backdrop") else null
+    @Volatile var recorded = false
+        private set
+
+    override fun draw(canvas: Canvas) {
+        val n = node
+        if (n == null || GlassTiers.current == GlassTier.BASIC || !canvas.isHardwareAccelerated || android.os.Build.VERSION.SDK_INT < 31) {
+            recorded = false
+            super.draw(canvas)
+            return
+        }
+        n.setPosition(0, 0, width, height)
+        val rc = n.beginRecording(width, height)
+        try {
+            super.draw(rc)
+        } finally {
+            n.endRecording()
+        }
+        recorded = true
+        canvas.drawRenderNode(n)
+    }
+}
+
+/** The live backdrop shared by every glass pane. */
+object LiveGlass {
+    @Volatile var target: GlassTarget? = null
+
+    fun ready(canvas: Canvas): Boolean {
+        val t = target ?: return false
+        return android.os.Build.VERSION.SDK_INT >= 31 && GlassTiers.current != GlassTier.BASIC &&
+            !GlassPrefs.reduceTransparency && canvas.isHardwareAccelerated && t.node != null && t.recorded && t.width > 0
+    }
+
+    /** The lens, applied after the blur as a RenderEffect (Android 13+): bends the blurred backdrop at the rim. */
+    const val LENS = """
+uniform shader content;
+uniform float2 origin;
+uniform float2 size;
+uniform float radius;
+uniform float band;
+uniform float bend;
+uniform float chroma;
+
+float sdBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + float2(r, r);
+    return length(max(q, float2(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+half4 main(float2 xy) {
+    float2 hb = size * 0.5;
+    float2 c = origin + hb;
+    float2 p = xy - c;
+    float r = min(radius, min(hb.x, hb.y));
+    float d = sdBox(p, hb, r);
+    if (d > 0.0) { return content.eval(xy); }
+    float e = 0.5;
+    float2 g = float2(sdBox(p + float2(e, 0.0), hb, r) - sdBox(p - float2(e, 0.0), hb, r),
+                      sdBox(p + float2(0.0, e), hb, r) - sdBox(p - float2(0.0, e), hb, r));
+    float2 n = g / max(length(g), 0.0001);
+    float x = clamp(1.0 + d / band, 0.0, 1.0);
+    float lens = 1.0 - sqrt(max(1.0 - x * x, 0.0));
+    float2 q = c + p * 0.97 - n * (bend * lens);
+    float ca = chroma * lens;
+    half4 base = content.eval(q);
+    return half4(content.eval(q + n * ca).r, base.g, content.eval(q - n * ca).b, base.a);
+}
+"""
+    @Volatile private var lensBroken = false
+
+    fun lens(): android.graphics.RuntimeShader? {
+        if (lensBroken || android.os.Build.VERSION.SDK_INT < 33) return null
+        return try {
+            android.graphics.RuntimeShader(LENS)
+        } catch (e: Throwable) {
+            android.util.Log.w("Facet", "glass lens rejected", e)
+            lensBroken = true
+            null
+        }
+    }
 }
 
 /** Global glass switches: "Reduce transparency" makes every pane nearly opaque. */
@@ -349,8 +497,14 @@ class GlassDrawable(
     private val radius: Float,
     private val density: Float,
     private val kind: GlassKind = GlassKind.NAV,
-    private val tintColor: Int = if (src.dark) 0xFF15110E.toInt() else 0xFFFBF6EA.toInt()
+    private val tintColor: Int = if (src.dark) 0xFF15110E.toInt() else 0xFFFBF6EA.toInt(),
+    /** Blur what is really behind the pane (the [LiveGlass] backdrop) instead of the still wallpaper. */
+    private val live: Boolean = false
 ) : Drawable() {
+    private val liveNode: android.graphics.RenderNode? = if (live && android.os.Build.VERSION.SDK_INT >= 31) android.graphics.RenderNode("facet-glass") else null
+    private val lensShader: android.graphics.RuntimeShader? = if (live && GlassTiers.current == GlassTier.FULL) LiveGlass.lens() else null
+    private var effectKey = ""
+    private val tloc = IntArray(2)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
     private val tint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -366,7 +520,74 @@ class GlassDrawable(
     private val loc = IntArray(2)
     private val oloc = IntArray(2)
 
-    init { src.views.add(view) }
+    init {
+        src.views.add(view)
+        if (live) {
+            // round, antialiased clip for the live blur (the outline comes from getOutline below)
+            view.clipToOutline = true
+        }
+    }
+
+    /**
+     * Live liquid glass: draws the backdrop node, offset to this pane, into a small RenderNode at reduced
+     * resolution with a GPU blur (and the lens on Android 13+), then scales it back up. Only the pane plus a
+     * thin margin is blurred, so the cost stays tiny even on budget phones.
+     */
+    private fun drawLive(canvas: Canvas): Boolean {
+        val node = liveNode ?: return false
+        val t = LiveGlass.target ?: return false
+        val full = GlassTiers.current == GlassTier.FULL
+        val s = if (full) 3f else 5f
+        val margin = density * 16f
+        view.getLocationInWindow(loc)
+        t.getLocationInWindow(tloc)
+        val dx = (loc[0] - tloc[0]) + rect.left
+        val dy = (loc[1] - tloc[1]) + rect.top
+        val nw = Math.ceil(((rect.width() + 2 * margin) / s).toDouble()).toInt().coerceAtLeast(1)
+        val nh = Math.ceil(((rect.height() + 2 * margin) / s).toDouble()).toInt().coerceAtLeast(1)
+        node.setPosition(0, 0, nw, nh)
+        val rc = node.beginRecording(nw, nh)
+        try {
+            rc.scale(1f / s, 1f / s)
+            rc.translate(-(dx - margin), -(dy - margin))
+            rc.drawRenderNode(t.node!!)
+        } finally {
+            node.endRecording()
+        }
+        val blurDp = if (kind == GlassKind.MENU) 26f else 18f
+        val key = "$nw/$nh/$s/${kind.name}"
+        if (key != effectKey) {
+            effectKey = key
+            val r = (density * blurDp / s).coerceAtLeast(1f)
+            var eff = android.graphics.RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP)
+            // a little extra saturation, like Apple's glass vibrancy
+            val sat = android.graphics.ColorMatrix().apply { setSaturation(1.35f) }
+            eff = android.graphics.RenderEffect.createChainEffect(
+                android.graphics.RenderEffect.createColorFilterEffect(android.graphics.ColorMatrixColorFilter(sat)), eff)
+            val lens = lensShader
+            if (lens != null && android.os.Build.VERSION.SDK_INT >= 33) {
+                try {
+                    lens.setFloatUniform("origin", margin / s, margin / s)
+                    lens.setFloatUniform("size", rect.width() / s, rect.height() / s)
+                    lens.setFloatUniform("radius", radius / s)
+                    lens.setFloatUniform("band", Math.min(density * 20f, Math.min(rect.width(), rect.height()) * 0.4f) / s)
+                    lens.setFloatUniform("bend", density * kind.bendDp / s)
+                    lens.setFloatUniform("chroma", density * kind.chroma / s)
+                    eff = android.graphics.RenderEffect.createChainEffect(android.graphics.RenderEffect.createRuntimeShaderEffect(lens, "content"), eff)
+                } catch (e: Throwable) {
+                    android.util.Log.w("Facet", "glass lens", e)
+                }
+            }
+            node.setRenderEffect(eff)
+        }
+        canvas.save()
+        canvas.clipRect(rect)
+        canvas.translate(rect.left - margin, rect.top - margin)
+        canvas.scale(s, s)
+        canvas.drawRenderNode(node)
+        canvas.restore()
+        return true
+    }
 
     /** Maps a bitmap that covers the origin view (centre-crop) into this pane's coordinates. */
     private fun place(matrix: Matrix, bmp: Bitmap, o: View?, dx: Float, dy: Float) {
@@ -393,7 +614,12 @@ class GlassDrawable(
             dy = (loc[1] - oloc[1]).toFloat()
         }
         val opaque = GlassPrefs.reduceTransparency
-        val tintAmt = if (opaque) 0.9f else if (src.dark) kind.tintDark else kind.tintLight
+        var tintAmt = if (opaque) 0.9f else if (src.dark) kind.tintDark else kind.tintLight
+        if (live && !opaque && LiveGlass.ready(canvas) && drawLive(canvas)) {
+            tintAmt *= 0.8f
+            overlay(canvas, tintAmt)
+            return
+        }
         val rs = liquid
         if (rs != null && !opaque && android.os.Build.VERSION.SDK_INT >= 33) {
             place(m, src.blurred, o, dx, dy)
@@ -427,6 +653,11 @@ class GlassDrawable(
         frostShader.setLocalMatrix(m)
         fill.shader = frostShader
         canvas.drawRoundRect(rect, radius, radius, fill)
+        overlay(canvas, tintAmt)
+    }
+
+    /** Tint toward the Paper surface, a top sheen, and the bright rim, over whichever backdrop was drawn. */
+    private fun overlay(canvas: Canvas, tintAmt: Float) {
         tint.color = withAlpha(tintColor, (255 * tintAmt).toInt().coerceIn(0, 255))
         canvas.drawRoundRect(rect, radius, radius, tint)
         edge.shader = LinearGradient(0f, rect.top, 0f, rect.top + rect.height() * 0.65f,

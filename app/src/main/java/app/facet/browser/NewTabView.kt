@@ -43,7 +43,8 @@ class NewTabView(
     private val glass: GlassSource? = look?.glass
     private val col = LinearLayout(ctx)
     private val topFade: EdgeFadeView? = glass?.let { EdgeFadeView(ctx, it, true) }
-    private val bottomFade: EdgeFadeView? = glass?.let { EdgeFadeView(ctx, it, false) }
+    // with live glass the toolbar itself blurs what scrolls beneath it, so only the basic tier needs the fade
+    private val bottomFade: EdgeFadeView? = if (GlassTiers.current == GlassTier.BASIC) glass?.let { EdgeFadeView(ctx, it, false) } else null
 
     /** Keeps the content clear of the status bar at the top and the floating toolbar below. */
     fun setInsets(top: Int, bottom: Int) {

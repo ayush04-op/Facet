@@ -69,7 +69,7 @@ class SheetView(
         card.orientation = LinearLayout.VERTICAL
         val backdrop = Backdrop.get()
         if (backdrop != null) {
-            card.background = GlassDrawable(backdrop, card, r, ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg)
+            card.background = GlassDrawable(backdrop, card, r, ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg, Backdrop.live)
         } else {
             val bg = GradientDrawable()
             bg.setColor(withAlpha(c.bg, 0xF2))

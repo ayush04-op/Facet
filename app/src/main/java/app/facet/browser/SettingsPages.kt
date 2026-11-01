@@ -92,6 +92,13 @@ fun appearancePage(h: SettingsHost): View {
             GlassPrefs.reduceTransparency = it
             h.homeChanged()
         }
+        b.section("Liquid glass")
+        val tierPick = p.getInt("glass_tier", 0)
+        val autoTier = GlassTiers.label(GlassTiers.compute(h.context, 0))
+        b.choice("Automatic", "Picked for this phone: $autoTier", tierPick == 0) { p.putInt("glass_tier", 0); h.reopen { appearancePage(h) }; h.toast("Restart Facet to apply") }
+        b.choice("Full", "Live blur of what's behind, with the refraction lens. Android 13 and newer.", tierPick == 1) { p.putInt("glass_tier", 1); h.reopen { appearancePage(h) }; h.toast("Restart Facet to apply") }
+        b.choice("Lite", "Live blur at lower resolution, no lens. Smooth on budget phones.", tierPick == 2) { p.putInt("glass_tier", 2); h.reopen { appearancePage(h) }; h.toast("Restart Facet to apply") }
+        b.choice("Basic", "Frosted glass with no per-frame work. Lightest on battery.", tierPick == 3) { p.putInt("glass_tier", 3); h.reopen { appearancePage(h) }; h.toast("Restart Facet to apply") }
         b.note("Facet always uses Prism Serif for headings and Prism Sans for text.")
     }
 }

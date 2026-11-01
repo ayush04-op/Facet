@@ -40,7 +40,7 @@ class MenuPopupView(
         card.orientation = LinearLayout.VERTICAL
         // Liquid Glass menu: refracts whatever is behind it (the wallpaper, or a snapshot of the page)
         val backdrop = Backdrop.get()
-        card.background = if (backdrop != null) GlassDrawable(backdrop, card, ctx.dpf(30f), ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg)
+        card.background = if (backdrop != null) GlassDrawable(backdrop, card, ctx.dpf(30f), ctx.resources.displayMetrics.density, GlassKind.MENU, c.bg, Backdrop.live)
         else SquircleDrawable(withAlpha(c.bg, 0xEE), withAlpha(c.ink, if (c.dark) 0x26 else 0x1A), ctx.dpf(1f), ctx.dpf(30f))
         card.elevation = ctx.dpf(8f)
         card.isClickable = true

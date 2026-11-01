@@ -63,7 +63,7 @@ class MainActivity : Activity() {
 
     private lateinit var geckoView: GeckoView
     private lateinit var rootFrame: FrameLayout
-    private lateinit var contentHost: FrameLayout
+    private lateinit var contentHost: GlassTarget
     private lateinit var bottomBar: LinearLayout
     private lateinit var progressLine: ProgressLine
     private lateinit var lockIcon: IconView
@@ -149,7 +149,12 @@ class MainActivity : Activity() {
             }
             res
         }
+        GlassTiers.detect(this, prefs.getInt("glass_tier", 0))
         geckoView = GeckoView(this)
+        // Full glass blurs web pages too, which needs the page in a TextureView (a SurfaceView can't be sampled).
+        if (GlassTiers.current == GlassTier.FULL) {
+            try { geckoView.setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) } catch (e: Throwable) { android.util.Log.w("Facet", "texture backend", e) }
+        }
 
         // Temporary workspaces never outlive the run they were made in.
         for (w in workspaces.all()) {
@@ -510,12 +515,26 @@ class MainActivity : Activity() {
         return GlassSource.plain(c.bg, c.dark)
     }
 
+    /** Whether menus and sheets can blur the live content right now (web pages need the TextureView backend). */
+    private fun liveBackdrop(): Boolean {
+        val tier = GlassTiers.current
+        if (tier == GlassTier.BASIC || GlassPrefs.reduceTransparency) return false
+        val home = current?.showsNewTab == true
+        return home || tier == GlassTier.FULL
+    }
+
     /** Captures the page once (GeckoView can render it to a bitmap) so a menu or sheet can refract it. */
     private fun withBackdrop(then: (GlassSource) -> Unit) {
+        if (liveBackdrop()) {
+            val src = currentBackdrop()
+            Backdrop.set(src, false, true)
+            then(src)
+            return
+        }
         val t = current
         if (t == null || t.showsNewTab || fullscreen || geckoView.parent == null) {
             val src = currentBackdrop()
-            Backdrop.set(src, false)
+            Backdrop.set(src, false, false)
             then(src)
             return
         }
@@ -523,7 +542,7 @@ class MainActivity : Activity() {
         val finish = { src: GlassSource ->
             if (!done) {
                 done = true
-                Backdrop.set(src, true)
+                Backdrop.set(src, true, false)
                 then(src)
             }
         }
@@ -564,10 +583,11 @@ class MainActivity : Activity() {
         barFloating = true
         val src = currentBackdrop()
         val d = resources.displayMetrics.density
+        val live = GlassTiers.current != GlassTier.BASIC
         bottomBar.background = null
-        addrPill.background = GlassDrawable(src, addrPill, dpf(26f), d)
-        navLeft.background = GlassDrawable(src, navLeft, dpf(26f), d)
-        navRight.background = GlassDrawable(src, navRight, dpf(26f), d)
+        addrPill.background = GlassDrawable(src, addrPill, dpf(26f), d, GlassKind.NAV, c.bg, live)
+        navLeft.background = GlassDrawable(src, navLeft, dpf(26f), d, GlassKind.NAV, c.bg, live)
+        navRight.background = GlassDrawable(src, navRight, dpf(26f), d, GlassKind.NAV, c.bg, live)
         applyInsets()
     }
 
@@ -578,7 +598,8 @@ class MainActivity : Activity() {
         rootFrame = FrameLayout(this)
         rootFrame.setBackgroundColor(c.bg)
 
-        contentHost = FrameLayout(this)
+        contentHost = GlassTarget(this)
+        LiveGlass.target = contentHost
         contentHost.isFocusableInTouchMode = true
         contentHost.setBackgroundColor(c.bg)
         rootFrame.addView(contentHost, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -892,7 +913,7 @@ class MainActivity : Activity() {
                 s.loadUri(pending)
             }
         }
-        Backdrop.set(currentBackdrop(), false)
+        Backdrop.set(currentBackdrop(), false, liveBackdrop())
         styleBar()
         refreshChrome()
     }
@@ -991,6 +1012,8 @@ class MainActivity : Activity() {
             "back" -> onBackPressed()
             "web" -> navigate("https://example.com")
             "tabs" -> showTabSwitcher()
+            "glass-full" -> prefs.putInt("glass_tier", 1)
+            "glass-lite" -> prefs.putInt("glass_tier", 2)
         }
     }
 
@@ -1392,7 +1415,7 @@ class MainActivity : Activity() {
     /** Frosts the home page behind menus and sheets (Android 12+). Web pages are drawn by the engine and stay as they are. */
     private fun updateBackdrop() {
         if (Build.VERSION.SDK_INT < 31) return
-        val want = overlays.isNotEmpty() && current?.showsNewTab == true && HomeConfig(prefs).glass
+        val want = overlays.isNotEmpty() && current?.showsNewTab == true && HomeConfig(prefs).glass && GlassTiers.current == GlassTier.FULL
         val target = if (want) 26f else 0f
         if (target == blurNow) return
         blurAnim?.cancel()
