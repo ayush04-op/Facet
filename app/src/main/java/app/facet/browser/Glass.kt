@@ -224,8 +224,10 @@ object Wallpapers {
 /** Where the glass samples from: the blurred wallpaper and the layer it is laid out against. */
 class GlassSource(val blurred: Bitmap, val dark: Boolean, val sharp: Bitmap? = null, val dimAlpha: Int = 0) {
     var origin: View? = null
-    val views = ArrayList<View>()
-    fun invalidateAll() { for (v in views) v.invalidate() }
+    // weak, de-duplicated: panes come and go (menus, rebuilt toolbars) and must not pile up here
+    private val views = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+    fun register(v: View) { views.add(v) }
+    fun invalidateAll() { for (v in views.toTypedArray()) v?.invalidate() }
 
     companion object {
         /** A backdrop of one flat colour: for glass that floats over a plain page. */
@@ -521,7 +523,8 @@ class GlassDrawable(
     private val oloc = IntArray(2)
 
     init {
-        src.views.add(view)
+        // live panes follow the backdrop on the render thread; only still-backdrop panes need scroll redraws
+        if (!live) src.register(view)
         if (live) {
             // round, antialiased clip for the live blur (the outline comes from getOutline below)
             view.clipToOutline = true
@@ -554,7 +557,7 @@ class GlassDrawable(
         } finally {
             node.endRecording()
         }
-        val blurDp = if (kind == GlassKind.MENU) 26f else 18f
+        val blurDp = if (kind == GlassKind.MENU) 32f else 18f
         val key = "$nw/$nh/$s/${kind.name}"
         if (key != effectKey) {
             effectKey = key
