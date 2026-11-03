@@ -34,7 +34,30 @@ frames() { $A shell dumpsys gfxinfo $PKG | grep -E "Total frames|Janky frames|50
 adb shell settings put global window_animation_scale 1
 sleep 40
 calm
-adb install -r "$APK" | tee -a shots/report.txt
+
+# First, while the emulator is fresh, the release build (R8-shrunk, as published): open the welcome and a web page,
+# and check it runs. Then it makes way for the debug build, which the rest of the script drives step by step.
+REL=app/build/outputs/apk/release/app-release.apk
+if [ -f "$REL" ]; then
+  report "---- release build ----"
+  timeout 120 adb install "$REL" | tee -a shots/report.txt
+  adb logcat -c
+  (adb logcat -v time > shots/logcat-release.txt 2>&1 &)
+  $A shell am start -n $PKG/.MainActivity >/dev/null
+  shot 00-release-welcome 15
+  $A shell am start -a android.intent.action.VIEW -d "https://example.com" $PKG >/dev/null
+  shot 00b-release-web 25
+  pkill -f "adb logcat" 2>/dev/null
+  grep -E "FATAL|Fatal signal|E AndroidRuntime|ClassNotFound|NoSuchMethod|NoSuchField" shots/logcat-release.txt | head -60 | tee -a shots/report.txt
+  if grep -qE "FATAL EXCEPTION|Fatal signal" shots/logcat-release.txt; then report "RELEASE RESULT: crashed"; else report "RELEASE RESULT: no crash"; fi
+  $A shell pidof $PKG >/dev/null && report "release app still running" || report "release app NOT running"
+  gzip -9 shots/logcat-release.txt
+  $A shell am force-stop $PKG
+  timeout 60 adb uninstall $PKG | tee -a shots/report.txt
+  report "---- debug build ----"
+fi
+
+timeout 120 adb install -r "$APK" | tee -a shots/report.txt
 report "RAM: $(adb shell cat /proc/meminfo | head -1)"
 adb logcat -c
 (adb logcat -v time > shots/logcat-full.txt 2>&1 &)
@@ -70,24 +93,4 @@ grep -E " Facet|FATAL|Fatal signal|E AndroidRuntime|glass|RenderThread|libhwui|D
 if grep -qE "FATAL EXCEPTION|Fatal signal" shots/logcat-full.txt; then report "RESULT: crashed"; else report "RESULT: no crash"; fi
 $A shell pidof $PKG >/dev/null && report "app still running" || report "app NOT running"
 gzip -9 shots/logcat-full.txt
-
-# The release build (R8-shrunk, as published): install it fresh, open the welcome and a web page, and check it runs.
-REL=app/build/outputs/apk/release/app-release.apk
-if [ -f "$REL" ]; then
-  report "---- release build ----"
-  $A shell am force-stop $PKG
-  adb uninstall $PKG | tee -a shots/report.txt
-  adb install "$REL" | tee -a shots/report.txt
-  adb logcat -c
-  (adb logcat -v time > shots/logcat-release.txt 2>&1 &)
-  $A shell am start -n $PKG/.MainActivity >/dev/null
-  shot 20-release-welcome 15
-  $A shell am start -a android.intent.action.VIEW -d "https://example.com" $PKG >/dev/null
-  shot 21-release-web 25
-  pkill -f "adb logcat" 2>/dev/null
-  grep -E "FATAL|Fatal signal|E AndroidRuntime|ClassNotFound|NoSuchMethod|NoSuchField" shots/logcat-release.txt | head -60 | tee -a shots/report.txt
-  if grep -qE "FATAL EXCEPTION|Fatal signal" shots/logcat-release.txt; then report "RELEASE RESULT: crashed"; else report "RELEASE RESULT: no crash"; fi
-  $A shell pidof $PKG >/dev/null && report "release app still running" || report "release app NOT running"
-  gzip -9 shots/logcat-release.txt
-fi
 exit 0
