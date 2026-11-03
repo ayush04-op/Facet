@@ -45,6 +45,9 @@ if [ -f "$REL" ]; then
   (adb logcat -v time > shots/logcat-release.txt 2>&1 &)
   $A shell am start -n $PKG/.MainActivity >/dev/null
   shot 00-release-welcome 15
+  # past the welcome with its Skip button (top right), then a real page, so the engine runs in the shrunk build too
+  $A shell input tap 945 231
+  shot 00a-release-home 6
   $A shell am start -a android.intent.action.VIEW -d "https://example.com" $PKG >/dev/null
   shot 00b-release-web 25
   pkill -f "adb logcat" 2>/dev/null
