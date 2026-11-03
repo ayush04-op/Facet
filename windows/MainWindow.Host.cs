@@ -62,6 +62,7 @@ namespace Facet
             ApplyTitleBar();
             if (top is AppearancePage) { OpenSettings(false); PushPage(new AppearancePage(this), false); }
             else if (top is HomeSettingsPage) { OpenSettings(false); PushPage(new HomeSettingsPage(this), false); }
+            else if (top is TabsPage) { OpenSettings(false); PushPage(new TabsPage(this), false); }
             else if (top != null) OpenSettings(false);
         }
 
@@ -123,7 +124,13 @@ namespace Facet
             if (prefs.RestoreTabs && data.SessionUrls.Count > 0)
             {
                 // only the selected tab loads now; the others load when first opened
-                foreach (var u in data.SessionUrls) NewTab(u, false, false, true);
+                var groups = data.SessionGroups ?? new List<string>();
+                for (int i = 0; i < data.SessionUrls.Count; i++)
+                {
+                    var t = NewTab(data.SessionUrls[i], false, false, true);
+                    if (i < groups.Count && !string.IsNullOrEmpty(groups[i])) t.Group = groups[i];
+                }
+                KeepGroupsTogether();
                 SelectTab(tabs[Math.Max(0, Math.Min(data.SessionSelected, tabs.Count - 1))]);
             }
             else NewTab(null, false);

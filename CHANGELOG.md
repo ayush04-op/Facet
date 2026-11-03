@@ -5,7 +5,7 @@
 Full notes: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ### Added
-- From Android 2.0: animated welcome, profiles and temporary sessions, Research with highlights and Markdown export, Reader view, command bar (Ctrl+K), redesigned home page with clock, weather and wallpapers, Paper AMOLED and accent colours, tracker levels and per-page report, remembered site permissions with reminders, History, Downloads page, optional AI assistant, the new logo.
+- From Android 2.0: animated welcome, profiles and temporary sessions, Research with highlights and Markdown export, Reader view, command bar (Ctrl+K), redesigned home page with clock, weather and wallpapers, Paper AMOLED and accent colours, tracker levels and per-page report, remembered site permissions with reminders, History, Downloads page, optional AI assistant, tab groups (right-click a tab; coloured, foldable, saved per profile), vertical tabs, the new logo (also in the installer).
 - Paper-themed Windows installer (`Facet-v3.0-Setup.exe`): per-user install, Start menu and desktop shortcuts,
   Apps & features entry with an uninstaller, registration as a browser for Default apps, and updates through setup.
 - Extensions: userscripts (`.user.js`, Greasy Fork) and page-changing Chrome / Firefox extensions (Chrome Web Store

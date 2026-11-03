@@ -480,6 +480,7 @@ namespace Facet
                 boundsBeforeFullscreen = new Rect(Left, Top, Width, Height);
                 titleRowEl.Visibility = Visibility.Collapsed;
                 toolbarEl.Visibility = Visibility.Collapsed;
+                if (sideEl != null) sideEl.Visibility = Visibility.Collapsed;
                 progress.Visibility = Visibility.Collapsed;
                 CloseFind();
                 if (chrome != null) { chrome.CaptionHeight = 0; chrome.ResizeBorderThickness = new Thickness(0); }
@@ -496,6 +497,7 @@ namespace Facet
             {
                 titleRowEl.Visibility = Visibility.Visible;
                 toolbarEl.Visibility = Visibility.Visible;
+                if (sideEl != null) sideEl.Visibility = Visibility.Visible;
                 if (chrome != null) { chrome.CaptionHeight = CaptionHeight; chrome.ResizeBorderThickness = new Thickness(6); }
                 Left = boundsBeforeFullscreen.Left; Top = boundsBeforeFullscreen.Top;
                 Width = boundsBeforeFullscreen.Width; Height = boundsBeforeFullscreen.Height;

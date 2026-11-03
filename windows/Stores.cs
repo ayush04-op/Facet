@@ -69,6 +69,7 @@ namespace Facet
     {
         public List<Bookmark> Bookmarks { get; set; } = new List<Bookmark>();
         public List<string> SessionUrls { get; set; } = new List<string>();
+        public List<string> SessionGroups { get; set; } = new List<string>();
         public int SessionSelected { get; set; }
     }
 
@@ -125,7 +126,7 @@ namespace Facet
 
         public static ProfileData Data(Prefs prefs, Profile p)
         {
-            if (p.Id == "personal") return new ProfileData { Bookmarks = prefs.Bookmarks, SessionUrls = prefs.SessionUrls, SessionSelected = prefs.SessionSelected };
+            if (p.Id == "personal") return new ProfileData { Bookmarks = prefs.Bookmarks, SessionUrls = prefs.SessionUrls, SessionGroups = prefs.SessionGroups, SessionSelected = prefs.SessionSelected };
             if (p.Kind == Profile.Temporary) return new ProfileData();
             return Json.Load<ProfileData>("profile-" + p.Id + ".json");
         }
@@ -134,7 +135,7 @@ namespace Facet
         {
             if (p.Id == "personal")
             {
-                prefs.Bookmarks = d.Bookmarks; prefs.SessionUrls = d.SessionUrls; prefs.SessionSelected = d.SessionSelected;
+                prefs.Bookmarks = d.Bookmarks; prefs.SessionUrls = d.SessionUrls; prefs.SessionGroups = d.SessionGroups; prefs.SessionSelected = d.SessionSelected;
                 prefs.Save();
                 return;
             }

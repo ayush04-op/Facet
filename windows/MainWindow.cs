@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
@@ -285,8 +286,16 @@ namespace Facet
             content.Children.Add(overlay);
             content.Children.Add(modal);
             content.Children.Add(toastHost);
-            Grid.SetRow(content, 3);
-            root.Children.Add(content);
+            // with vertical tabs, the tab list sits to the left of the page
+            var body = new Grid();
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            sideEl = null; sideList = null;
+            if (prefs.VerticalTabs) body.Children.Add(BuildSidebar());
+            Grid.SetColumn(content, 1);
+            body.Children.Add(content);
+            Grid.SetRow(body, 3);
+            root.Children.Add(body);
 
             foreach (var t in tabs) host.Children.Add(t.Browser);
             host.Children.Add(newTabView);
@@ -343,6 +352,8 @@ namespace Facet
         {
             bool switched = t != current;
             current = t;
+            // going to a tab in a folded group opens the group
+            if (t.Group != null) collapsedGroups.Remove(t.Group);
             // Going to a tab means leaving Settings, the same as in Chrome.
             ClosePages();
             foreach (var x in tabs)
@@ -384,7 +395,8 @@ namespace Facet
             chip.IsHitTestVisible = false;
             var shrink = Anim.To(0, 150, Anim.In);
             shrink.Completed += (s, e) => { closing.Remove(t); RemoveTab(t); };
-            chip.BeginAnimation(WidthProperty, shrink);
+            // along the top a chip narrows away; in the side list a row flattens
+            chip.BeginAnimation(prefs.VerticalTabs ? HeightProperty : WidthProperty, shrink);
             chip.BeginAnimation(OpacityProperty, Anim.To(0, 120, Anim.In));
         }
 
@@ -406,22 +418,29 @@ namespace Facet
             // Most tab changes (loading started/stopped, back/forward state) don't change the strip: skip the rebuild.
             var sig = new System.Text.StringBuilder();
             sig.Append((int)ActualWidth).Append('|');
+            sig.Append(prefs.VerticalTabs ? 'v' : 'h').Append(string.Join(",", collapsedGroups)).Append('|');
             foreach (var t in tabs)
                 sig.Append(t.GetHashCode()).Append(t == current ? '*' : ' ').Append(closing.Contains(t) ? 'x' : ' ')
-                   .Append(t.ShowsNewTab ? "" : t.Title).Append('\n');
+                   .Append(t.Group ?? "").Append('\u0001').Append(t.ShowsNewTab ? "" : t.Title).Append('\n');
             string key = sig.ToString();
             if (growing == null && key == tabsKey) return;
             tabsKey = key;
             tabStrip.Children.Clear();
             chips.Clear();
-            // leave room for the new-tab button, the window buttons and some empty title bar to drag
-            double avail = Math.Max(300, ActualWidth - 260);
-            int shown = Math.Max(1, tabs.Count - closing.Count);
+            if (prefs.VerticalTabs) { RefreshSideTabs(); return; }
+            // leave room for the new-tab button, the window buttons, the group names and some empty title bar to drag
+            int labels = GroupNames().Count();
+            double avail = Math.Max(300, ActualWidth - 260 - labels * 90);
+            int shown = Math.Max(1, tabs.Count(x => !closing.Contains(x) && (x.Group == null || !collapsedGroups.Contains(x.Group))));
             double w = Math.Max(80, Math.Min(220, avail / shown));
+            string prev = null;
             foreach (var t in tabs)
             {
                 var tab = t;
                 if (closing.Contains(tab)) continue;
+                if (tab.Group != null && tab.Group != prev) tabStrip.Children.Add(StripGroupLabel(tab.Group, tabs.Count(x => x.Group == tab.Group)));
+                prev = tab.Group;
+                if (tab.Group != null && collapsedGroups.Contains(tab.Group)) continue;
                 bool sel = tab == current;
                 var chip = Ui.Box(sel ? p.Surface : Brushes.Transparent, 10, sel ? p.Line : null);
                 chip.Width = w; chip.Height = 32; chip.Margin = new Thickness(0, 0, 4, 0);
@@ -446,9 +465,17 @@ namespace Facet
                 var x = Ui.IconButton(p, "close", 12, () => CloseTab(tab), 22);
                 Grid.SetColumn(x, 2);
                 g.Children.Add(x);
-                chip.Child = g;
+                if (tab.Group != null)
+                {
+                    var cg = new Grid();
+                    cg.Children.Add(g);
+                    cg.Children.Add(GroupLine(tab.Group));
+                    chip.Child = cg;
+                }
+                else chip.Child = g;
                 Ui.Button(chip, sel ? p.Surface : Brushes.Transparent, sel ? p.Surface : p.Hover, () => SelectTab(tab));
                 chip.MouseUp += (s, e) => { if (e.ChangedButton == MouseButton.Middle) CloseTab(tab); };
+                chip.MouseRightButtonUp += (s, e) => { ShowTabMenu(tab); e.Handled = true; };
                 tabStrip.Children.Add(chip);
             }
             var plus = Ui.IconButton(p, "plus", 17, () => NewTab(null, false), 30);
@@ -904,14 +931,17 @@ namespace Facet
         private void SaveState()
         {
             var urls = new List<string>();
+            var groups = new List<string>();
             int selected = 0;
             foreach (var t in tabs)
             {
                 if (t.IsPrivate || string.IsNullOrEmpty(t.Url)) continue;
                 if (t == current) selected = urls.Count;
                 urls.Add(t.Url);
+                groups.Add(t.Group ?? "");
             }
             data.SessionUrls = urls;
+            data.SessionGroups = groups;
             data.SessionSelected = selected;
             // add only what's new since the last save (sessions are now saved often, not just on closing)
             prefs.TrackersBlocked += Stats.Blocked - savedBlocked; savedBlocked = Stats.Blocked;

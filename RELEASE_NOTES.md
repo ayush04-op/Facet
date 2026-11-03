@@ -48,7 +48,12 @@ show a SmartScreen notice the first time because the installer isn't code-signed
   runs in private tabs. Adds *Summarize page* and *Ask about this page*.
 - **JavaScript** switch, crash-safe sessions (tabs are saved as you browse), crashed pages reload themselves,
   page dialogs and permission prompts, fullscreen video.
-- **The new Facet logo** on the app, taskbar, Start menu and the welcome.
+- **Tab groups**: right-click a tab to put it in a named group. Each group gets its own colour, its tabs stay
+  together, and clicking the group's name folds them away. Right-click the name to rename, ungroup or close it.
+  Groups are saved with your tabs, per profile.
+- **Vertical tabs**: show your tabs as a list on the left, grouped by tab group (Settings → Tabs and groups, the
+  tab right-click menu, or the command bar).
+- **The new Facet logo** on the app, taskbar, Start menu, the welcome and the installer.
 
 ### Extensions
 - **Userscripts**: open a script's *Install* link on Greasy Fork (or any `.user.js` link) and Facet offers to add it.
@@ -72,7 +77,7 @@ view source and **Inspect**. Shortcuts are shown next to each item.
   opening its pages; a blank address bar after closing a new tab.
 
 ### Not on Windows yet
-Tab groups and the vertical tab list, and Safe Browsing (the engine Facet embeds doesn't include it).
+Safe Browsing (the engine Facet embeds doesn't include it).
 
 ---
 

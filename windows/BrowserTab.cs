@@ -15,6 +15,8 @@ namespace Facet
         public string Url = "";
         public bool Loading, CanBack, CanForward;
         public bool ShowsNewTab = true;
+        /// <summary>Name of the tab group this tab belongs to, or null. Groups live inside one profile.</summary>
+        public string Group;
 
         /// <summary>A restored tab that hasn't been looked at yet. It stays unloaded (no page, no renderer work) until selected.</summary>
         private string pending;

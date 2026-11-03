@@ -98,7 +98,7 @@ namespace Facet
 
             g = Group("Browsing");
             kit.Add(g, kit.Value("search", "Search engine", Urls.EngineById(P.SearchEngine).Name, null, () => h.Push(new EnginePage(h))));
-            kit.Add(g, kit.Toggle("tabs", "Restore tabs on launch", "Reopens your tabs, also after a crash. Private tabs are never saved.", P.RestoreTabs, v => { P.RestoreTabs = v; Saved(); }));
+            kit.Add(g, kit.Value("tabs", "Tabs and groups", P.VerticalTabs ? "On the side" : "Along the top", "Tab layout, tab groups, restoring tabs", () => h.Push(new TabsPage(h))));
             kit.Add(g, kit.Value("refresh", "History", History.All(h.Profile.Id).Count + " pages", "Pages you visited in this profile", () => h.Push(new HistoryPage(h))));
             kit.Add(g, kit.Value("download", "Downloads", Downloads.All().Count(x => x.State == 0) > 0 ? "In progress" : Downloads.All().Count + " files", null, () => h.Push(new DownloadsPage(h))));
             int on = Extensions.All.FindAll(x => x.Enabled).Count;
@@ -132,6 +132,29 @@ namespace Facet
                 var eng = e;
                 kit.Add(g, kit.Choice(eng.Name, null, eng.Id == P.SearchEngine, () => { P.SearchEngine = eng.Id; Saved(); Rebuild(); }));
             }
+        }
+    }
+
+    public class TabsPage : PageBase
+    {
+        public TabsPage(IFacetHost h) : base(h, "Tabs and groups") { Rebuild(); }
+
+        protected override void Build()
+        {
+            var g = Group("Tab layout");
+            kit.Add(g, kit.Choice("Along the top", "Tabs in the title bar, as in most browsers.", !P.VerticalTabs, () => Layout(false)));
+            kit.Add(g, kit.Choice("On the side", "A list on the left, grouped by tab group. Easy to scan with many tabs.", P.VerticalTabs, () => Layout(true)));
+            g = Group("Sessions");
+            kit.Add(g, kit.Toggle("tabs", "Restore tabs on launch", "Reopens your tabs and groups, also after a crash. Private tabs are never saved.", P.RestoreTabs, v => { P.RestoreTabs = v; Saved(); }));
+            Note("Right-click a tab to put it in a group. Click a group's name to fold its tabs away, or right-click it to rename, ungroup or close it. Each profile keeps its own tabs and groups.");
+        }
+
+        private void Layout(bool vertical)
+        {
+            if (P.VerticalTabs == vertical) return;
+            P.VerticalTabs = vertical;
+            Saved();
+            h.ApplyTheme();
         }
     }
 

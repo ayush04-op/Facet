@@ -35,6 +35,8 @@ namespace Facet
             act("lock", "Site permissions", null, () => { OpenSettings(true); PushPage(new SitePermissionsPage(this)); });
             act("device", "Home page settings", "Accent, background, clock, weather", () => { OpenSettings(true); PushPage(new HomeSettingsPage(this)); });
             act("settings", "Appearance", "Theme and accent colour", () => { OpenSettings(true); PushPage(new AppearancePage(this)); });
+            act("tabs", "Tabs and groups", "Vertical tabs, tab groups, restoring tabs", () => { OpenSettings(true); PushPage(new TabsPage(this)); });
+            act("tabs", prefs.VerticalTabs ? "Show tabs along the top" : "Show tabs on the side", "Tab layout", ToggleVerticalTabs);
             act("info", "AI assistant", null, () => { OpenSettings(true); PushPage(new AiPage(this)); });
             act("refresh", "Software update", null, ShowUpdates);
             if (current != null && !current.ShowsNewTab)

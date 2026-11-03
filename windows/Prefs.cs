@@ -49,7 +49,11 @@ namespace Facet
         public long TrackersBlocked { get; set; }
         public long SecureLoads { get; set; }
         public List<string> SessionUrls { get; set; } = new List<string>();
+        /// <summary>Each saved tab's group ("" for none), alongside SessionUrls.</summary>
+        public List<string> SessionGroups { get; set; } = new List<string>();
         public int SessionSelected { get; set; }
+        /// <summary>Tabs in a list on the left instead of along the top.</summary>
+        public bool VerticalTabs { get; set; }
         public List<Bookmark> Bookmarks { get; set; } = new List<Bookmark>();
 
         public string UpdateRepo { get; set; } = "ayush04-op/Facet";
