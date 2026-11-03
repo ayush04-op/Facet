@@ -92,10 +92,13 @@ jobs:
       - name: Name the APK
         run: cp app/build/outputs/apk/debug/app-debug.apk "Facet-v${{ steps.ver.outputs.name }}-debug.apk"
 
+      # Test builds keep their files for two days only, and a full artifact quota does not fail them; releases need the upload.
       - uses: actions/upload-artifact@v4
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/v') && !startsWith(github.event.inputs.release_tag, 'v') }}
         with:
           name: Facet-v${{ steps.ver.outputs.name }}
           path: Facet-v*.apk
+          retention-days: 2
 
   windows:
     runs-on: windows-latest
@@ -171,8 +174,10 @@ jobs:
           Write-Output "::notice title=installer::install and uninstall both work"
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/v') && !startsWith(github.event.inputs.release_tag, 'v') }}
         with:
           name: Facet-v${{ steps.ver.outputs.name }}-windows
+          retention-days: 2
           path: |
             dist/Facet-v*-Setup.exe
             dist/Facet-v*-windows-x64.zip
