@@ -53,14 +53,19 @@ namespace Facet
                     r.Tag = Str(o, "tag_name"); r.Title = Str(o, "name"); r.Notes = Str(o, "body"); r.Published = Str(o, "published_at");
                     if (o.TryGetProperty("assets", out var assets))
                     {
+                        // An installed Facet updates through the setup program (it keeps shortcuts and the Apps entry
+                        // right); a portable copy swaps in the zip.
+                        bool installed = Installed;
                         foreach (var a in assets.EnumerateArray())
                         {
                             var name = Str(a, "name");
-                            if (name.EndsWith("windows-x64.zip", StringComparison.OrdinalIgnoreCase))
+                            bool setup = name.EndsWith("-Setup.exe", StringComparison.OrdinalIgnoreCase);
+                            bool zip = name.EndsWith("windows-x64.zip", StringComparison.OrdinalIgnoreCase);
+                            if ((installed && setup) || (!installed && zip) || (r.AssetUrl.Length == 0 && (setup || zip)))
                             {
                                 r.AssetName = name; r.AssetUrl = Str(a, "url");
                                 r.Size = a.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0;
-                                break;
+                                if ((installed && setup) || (!installed && zip)) break;
                             }
                         }
                     }
@@ -102,7 +107,7 @@ namespace Facet
             string dir = Path.Combine(AppInfo.DataDir, "update");
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
             Directory.CreateDirectory(dir);
-            string zip = Path.Combine(dir, "Facet-update.zip");
+            string zip = Path.Combine(dir, r.AssetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? "Facet-Setup.exe" : "Facet-update.zip");
 
             string url = r.AssetUrl;
             string auth = token;
@@ -154,9 +159,24 @@ namespace Facet
             catch { return false; }
         }
 
-        /// <summary>Unpacks the zip, then runs a small script that copies it over this folder once Facet has exited.</summary>
+        /// <summary>True when this copy was put here by Facet's installer (rather than unzipped by hand).</summary>
+        public static bool Installed
+        {
+            get { return File.Exists(Path.Combine(AppContext.BaseDirectory, "facet-install.json")); }
+        }
+
+        /// <summary>
+        /// Installed: runs the downloaded setup in update mode (it waits for Facet to close, updates, reopens it).
+        /// Portable: unpacks the zip, then a small script copies it over this folder once Facet has exited.
+        /// </summary>
         public static void ApplyAndRestart(string zip)
         {
+            if (zip.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                Process.Start(new ProcessStartInfo(zip, "/update \"/dir=" + AppContext.BaseDirectory.TrimEnd('\\') + "\"") { UseShellExecute = true });
+                System.Windows.Application.Current.Shutdown();
+                return;
+            }
             string work = Path.Combine(AppInfo.DataDir, "update");
             string fresh = Path.Combine(work, "new");
             if (Directory.Exists(fresh)) Directory.Delete(fresh, true);

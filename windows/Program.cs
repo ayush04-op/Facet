@@ -37,9 +37,11 @@ namespace Facet
         public static int Main(string[] args)
         {
             bool created;
+            string startUrl = args.Length > 0 ? ToUrl(args[0]) : null;
             using (var mutex = new Mutex(true, "Facet.Browser.SingleInstance", out created))
             {
-                if (!created) return 0;
+                // Facet is already open: hand it the link (from another app, now that Facet can be the default browser)
+                if (!created) { Forward(startUrl ?? ""); return 0; }
 
                 var s = new CefSettings();
                 s.CachePath = Path.Combine(AppInfo.DataDir, "cef");
@@ -47,17 +49,57 @@ namespace Facet
                 s.LogSeverity = smoke ? LogSeverity.Warning : LogSeverity.Disable;
                 if (smoke) s.LogFile = Path.Combine(AppInfo.DataDir, "cef.log");
                 s.PersistSessionCookies = false;
-                s.CefCommandLineArgs["disable-features"] = "TranslateUI";
+                // Switch off Chromium services Facet has no use for. MediaRouter (casting) scans the local network, which
+                // costs CPU and is what makes Windows Firewall ask about CefSharp.BrowserSubprocess. The spare renderer
+                // is an idle process Chromium keeps warm in case a new site opens.
+                s.CefCommandLineArgs["disable-features"] = "TranslateUI,MediaRouter,DialMediaRouteProvider,OptimizationHints,SpareRendererForSitePerProcess,AutofillServerCommunication";
+                s.CefCommandLineArgs["disable-background-networking"] = "1";
+                // eased wheel scrolling on websites, matching the scrolling in Facet's own pages
+                s.CefCommandLineArgs["enable-smooth-scrolling"] = "1";
+                // extensions' own files (images, fonts, pages they show) are served from facet-extension://ext/<id>/...
+                s.RegisterScheme(new CefCustomScheme
+                {
+                    SchemeName = Extensions.Scheme,
+                    SchemeHandlerFactory = new ExtensionFiles(),
+                    IsStandard = true, IsSecure = true, IsCorsEnabled = true, IsFetchEnabled = true
+                });
+                s.CefCommandLineArgs["disable-component-update"] = "1";
+                s.CefCommandLineArgs["disable-domain-reliability"] = "1";
                 Cef.Initialize(s, performDependencyCheck: false, browserProcessHandler: null);
 
+                Anim.MatchDisplay();
                 var app = new Application();
                 app.ShutdownMode = ShutdownMode.OnMainWindowClose;
-                string startUrl = args.Length > 0 ? args[0] : null;
                 app.Run(new MainWindow(startUrl));
 
                 Cef.Shutdown();
             }
             return 0;
+        }
+
+        public static string PipeName { get { return "Facet.Browser.Open." + Environment.UserName; } }
+
+        /// <summary>Links and files arrive as arguments; files become file:/// addresses.</summary>
+        public static string ToUrl(string arg)
+        {
+            arg = (arg ?? "").Trim().Trim('"');
+            if (arg.Length == 0) return null;
+            try { if (File.Exists(arg)) return new Uri(Path.GetFullPath(arg)).AbsoluteUri; } catch { }
+            return arg;
+        }
+
+        private static void Forward(string url)
+        {
+            try
+            {
+                using (var pipe = new System.IO.Pipes.NamedPipeClientStream(".", PipeName, System.IO.Pipes.PipeDirection.Out))
+                {
+                    pipe.Connect(3000);
+                    var data = System.Text.Encoding.UTF8.GetBytes(url);
+                    pipe.Write(data, 0, data.Length);
+                }
+            }
+            catch { /* the other Facet is closing; nothing to hand over */ }
         }
     }
 }

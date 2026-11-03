@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Facet's paper-themed installer. It targets .NET Framework 4.8, which ships with Windows 10 and 11, so the
+    setup program needs no runtime of its own. The browser itself is embedded as payload.zip when the build is
+    given -p:Payload=<path to the Windows zip>; built without a payload, the same program is the uninstaller
+    that setup places next to Facet.exe.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Facet-Setup</AssemblyName>
+    <RootNamespace>Facet.Setup</RootNamespace>
+    <Version>1.0</Version>
+    <Product>Facet</Product>
+    <Company>Ayush</Company>
+    <AssemblyTitle>Facet Setup</AssemblyTitle>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\windows\Facet.ico</ApplicationIcon>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the Prism fonts and the paper cube, shared with the app -->
+    <Resource Include="..\app\src\main\assets\fonts\*.otf" Link="Fonts\%(Filename)%(Extension)" />
+    <Resource Include="..\windows\Facet.ico" Link="Facet.ico" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Payload)' != ''">
+    <EmbeddedResource Include="$(Payload)" LogicalName="payload.zip" />
+  </ItemGroup>
+
+</Project>

@@ -170,7 +170,6 @@ namespace Facet
             kit.Add(src, kit.Toggle("refresh", "Check automatically", "Looks for a new release when Facet starts, at most twice a day.", prefs.AutoCheckUpdates, v => { prefs.AutoCheckUpdates = v; prefs.Save(); }));
             body.Children.Add(b3);
             body.Children.Add(kit.Note("Last checked " + Ago(prefs.LastUpdateCheck) + ". The token is encrypted for your Windows account and only sent to api.github.com."));
-            Kit.FadeIn(card);
         }
     }
 }

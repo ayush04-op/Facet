@@ -8,3 +8,10 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Windows build output
+bin/
+obj/
+build-work/
+dist/
+publish/

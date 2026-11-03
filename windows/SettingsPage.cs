@@ -10,12 +10,13 @@ namespace Facet
         private readonly Prefs prefs;
         private readonly Kit kit;
         private readonly StackPanel body;
-        private readonly Action onBack, onToggled, openEngine, openTheme, clearData, openUpdates;
+        private readonly Action onBack, onToggled, openEngine, openTheme, clearData, openUpdates, openExtensions;
 
-        public SettingsPage(Palette p, Prefs prefs, Action onBack, Action onToggled, Action openEngine, Action openTheme, Action clearData, Action openUpdates)
+        public SettingsPage(Palette p, Prefs prefs, Action onBack, Action onToggled, Action openEngine, Action openTheme, Action clearData, Action openUpdates, Action openExtensions)
         {
             this.p = p; this.prefs = prefs; this.onBack = onBack; this.onToggled = onToggled;
             this.openEngine = openEngine; this.openTheme = openTheme; this.clearData = clearData; this.openUpdates = openUpdates;
+            this.openExtensions = openExtensions;
             kit = new Kit(p);
             Children.Add(kit.Page("Settings", onBack, out body));
             Rebuild();
@@ -46,6 +47,9 @@ namespace Facet
             gp = kit.Group(out g);
             kit.Add(gp, kit.Value("search", "Search engine", Urls.EngineById(prefs.SearchEngine).Name, null, openEngine));
             kit.Add(gp, kit.Toggle("tabs", "Restore tabs on launch", "Private tabs are never saved.", prefs.RestoreTabs, v => { prefs.RestoreTabs = v; Changed(); }));
+            int on = Extensions.All.FindAll(x => x.Enabled).Count;
+            kit.Add(gp, kit.Value("puzzle", "Extensions", Extensions.All.Count == 0 ? "None" : on + " of " + Extensions.All.Count + " on",
+                "Userscripts and page-changing extensions", openExtensions));
             body.Children.Add(g);
 
             body.Children.Add(kit.Section("Appearance"));
@@ -73,7 +77,7 @@ namespace Facet
             body.Children.Add(g);
             body.Children.Add(kit.Note("Facet collects nothing: no accounts, no analytics, no telemetry. Chromium is bundled inside the app, so Facet doesn't depend on Edge or any other browser."));
             body.Children.Add(kit.Note("Made by Ayush, written with Claude, an AI model from Anthropic."));
-            Kit.FadeIn(body);
+            // no animation here: the page animates once when it opens, and refreshes after that happen in place
         }
 
         private void Changed() { prefs.Save(); onToggled(); }

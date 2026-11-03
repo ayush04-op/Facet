@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Microsoft.Win32;
 
@@ -95,14 +96,28 @@ namespace Facet
             return b;
         }
 
-        /// <summary>Makes a Border react to hover and click.</summary>
-        public static void Button(Border b, Brush normal, Brush hover, Action onClick)
+        /// <summary>Makes a Border react to hover and click. The hover colour fades in, and the button gives a little on press.</summary>
+        public static void Button(Border b, Brush normal, Brush hover, Action onClick, bool press = true)
         {
-            b.Background = normal;
+            Color h = hover is SolidColorBrush hs ? hs.Color : Colors.Transparent;
+            Color n = normal is SolidColorBrush ns ? ns.Color : Colors.Transparent;
+            // Fade from a see-through version of the hover colour, not from transparent white.
+            if (n.A == 0) n = Color.FromArgb(0, h.R, h.G, h.B);
+            var fill = new SolidColorBrush(n);
+            b.Background = fill;
             b.Cursor = Cursors.Hand;
-            b.MouseEnter += (s, e) => b.Background = hover;
-            b.MouseLeave += (s, e) => b.Background = normal;
-            b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+            bool pressed = false;
+            b.MouseEnter += (s, e) => Anim.Color(fill, h, 120);
+            b.MouseLeave += (s, e) => { pressed = false; Anim.Color(fill, n, 180); if (press) Anim.Scale(b, 1, 120); };
+            // icons dip noticeably; wide rows and tabs only a touch
+            b.MouseLeftButtonDown += (s, e) => { pressed = true; if (press) Anim.Scale(b, b.ActualWidth > 120 ? 0.985 : 0.92, 90); e.Handled = true; };
+            b.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                if (press) Anim.Scale(b, 1, 160);
+                // Only a press that started on this button counts, so a drag that ends here doesn't click it.
+                if (pressed) { pressed = false; onClick(); }
+            };
         }
 
         public static Border IconButton(Palette p, string icon, double size, Action onClick, double box = 34)
@@ -122,6 +137,63 @@ namespace Facet
             ((TextBlock)b.Child).TextAlignment = TextAlignment.Center;
             Button(b, primary ? p.Accent : Brushes.Transparent, primary ? p.Accent : p.Hover, onClick);
             return b;
+        }
+    }
+
+    /// <summary>Small animation helpers. Everything eases out so motion settles quickly.</summary>
+    public static class Anim
+    {
+        // Quartic ease-out: quick to respond, long gentle settle (the curve Windows 11 and Chrome use for UI motion).
+        public static readonly IEasingFunction Out = Frozen(new QuarticEase { EasingMode = EasingMode.EaseOut });
+        public static readonly IEasingFunction In = Frozen(new CubicEase { EasingMode = EasingMode.EaseIn });
+
+        private static IEasingFunction Frozen(EasingFunctionBase e) { e.Freeze(); return e; }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr h);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr h, IntPtr dc);
+        [System.Runtime.InteropServices.DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr dc, int index);
+
+        /// <summary>The main display's refresh rate in Hz (60 when it can't be read).</summary>
+        public static int RefreshRate()
+        {
+            try
+            {
+                var dc = GetDC(IntPtr.Zero);
+                int hz = GetDeviceCaps(dc, 116 /* VREFRESH */);
+                ReleaseDC(IntPtr.Zero, dc);
+                return hz > 1 ? hz : 60;
+            }
+            catch { return 60; }
+        }
+
+        /// <summary>WPF animates at 60 fps unless told otherwise; match the screen so 120/144 Hz displays get every frame.</summary>
+        public static void MatchDisplay()
+        {
+            Timeline.DesiredFrameRateProperty.OverrideMetadata(typeof(Timeline), new FrameworkPropertyMetadata { DefaultValue = RefreshRate() });
+        }
+
+        public static DoubleAnimation To(double to, int ms, IEasingFunction ease = null)
+        {
+            return new DoubleAnimation(to, TimeSpan.FromMilliseconds(ms)) { EasingFunction = ease ?? Out };
+        }
+
+        public static void Color(SolidColorBrush b, Color to, int ms)
+        {
+            b.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(to, TimeSpan.FromMilliseconds(ms)) { EasingFunction = Out });
+        }
+
+        public static void Scale(UIElement e, double to, int ms)
+        {
+            var s = e.RenderTransform as ScaleTransform;
+            if (s == null) { s = new ScaleTransform(1, 1); e.RenderTransform = s; e.RenderTransformOrigin = new Point(0.5, 0.5); }
+            var a = To(to, ms);
+            s.BeginAnimation(ScaleTransform.ScaleXProperty, a);
+            s.BeginAnimation(ScaleTransform.ScaleYProperty, a);
+        }
+
+        public static void Opacity(UIElement e, double from, double to, int ms)
+        {
+            e.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(ms)) { EasingFunction = Out });
         }
     }
 
@@ -152,16 +224,42 @@ namespace Facet
                 case "link": return "M10,14 C8,12 8,10 10,8 L12,6 C14,4 17,5 18,7 M14,10 C16,12 16,14 14,16 L12,18 C10,20 7,19 6,17";
                 case "device": return "M8,3 L16,3 A1.6,1.6 0 0 1 17.6,4.6 L17.6,19.4 A1.6,1.6 0 0 1 16,21 L8,21 A1.6,1.6 0 0 1 6.4,19.4 L6.4,4.6 A1.6,1.6 0 0 1 8,3 Z M10.5,17.5 L13.5,17.5";
                 case "tabs": return "M4,6 L20,6 L20,18 L4,18 Z";
+                case "print": return "M7,9 L7,4 L17,4 L17,9 M7,17 L5,17 L5,9 L19,9 L19,17 L17,17 M7,14 L17,14 L17,20 L7,20 Z";
+                case "puzzle": return "M5,8 L9,8 C9,5 13,5 13,8 L17,8 L17,12 C20,12 20,16 17,16 L17,20 L5,20 L5,16 C8,16 8,12 5,12 Z";
+                case "zoom": return "M10.5,4.5 A6,6 0 1 1 10.49,4.5 M15,15 L20,20 M8,10.5 L13,10.5 M10.5,8 L10.5,13";
+                case "copy": return "M8,8 L19,8 L19,20 L8,20 Z M5,16 L5,4 L16,4";
+                case "image": return "M4,5 L20,5 L20,19 L4,19 Z M4,16 L9,11 L13,15 L16,12 L20,16 M15.5,8.5 L15.5,8.51";
+                case "paste": return "M9,4 L15,4 L15,7 L9,7 Z M9,5.5 L6,5.5 L6,20 L18,20 L18,5.5 L15,5.5";
+                case "cut": return "M7,4 L17,20 M17,4 L7,20 M7,17 A2.5,2.5 0 1 0 7.01,17 M17,17 A2.5,2.5 0 1 0 17.01,17";
+                case "minimize": return "M6,12 L18,12";
+                case "maximize": return "M6.5,6.5 L17.5,6.5 L17.5,17.5 L6.5,17.5 Z";
+                case "restore": return "M6,9 L15,9 L15,18 L6,18 Z M9,9 L9,6 L18,6 L18,15 L15,15";
                 default: return "M12,12 L12,12.01";
             }
         }
 
-        public static UIElement Make(string name, Brush color, double size)
+        // parsed once and frozen: the toolbar and tab strip redraw icons often
+        private static readonly System.Collections.Generic.Dictionary<string, Geometry> Parsed = new System.Collections.Generic.Dictionary<string, Geometry>();
+
+        private static Geometry Shape(string name)
+        {
+            Geometry g;
+            if (!Parsed.TryGetValue(name, out g))
+            {
+                g = Geometry.Parse(Data(name));
+                g.Freeze();
+                Parsed[name] = g;
+            }
+            return g;
+        }
+
+        /// <summary>stroke is in 24x24 grid units; 0 means the usual weight.</summary>
+        public static UIElement Make(string name, Brush color, double size, double stroke = 0)
         {
             var path = new Path();
-            path.Data = Geometry.Parse(Data(name));
+            path.Data = Shape(name);
             path.Stroke = color;
-            path.StrokeThickness = name == "menu" ? 3.2 : 1.8;
+            path.StrokeThickness = stroke > 0 ? stroke : name == "menu" ? 3.2 : 1.8;
             path.StrokeStartLineCap = PenLineCap.Round;
             path.StrokeEndLineCap = PenLineCap.Round;
             path.StrokeLineJoin = PenLineJoin.Round;

@@ -73,14 +73,42 @@ namespace Facet
 
     public class FacetRequestHandler : RequestHandler
     {
-        private readonly Prefs prefs;
-        public FacetRequestHandler(Prefs prefs) { this.prefs = prefs; }
+        // Stateless, so one instance serves every request instead of allocating one per request.
+        private readonly FacetResourceHandler handler;
+        private readonly Action crashed;
+        private readonly Action<string> userScript;
+
+        public FacetRequestHandler(Prefs prefs, Action crashed = null, Action<string> userScript = null)
+        {
+            handler = new FacetResourceHandler(prefs);
+            this.crashed = crashed;
+            this.userScript = userScript;
+        }
+
+        /// <summary>The page's process crashed or was killed: Facet reloads it (the tab decides how often).</summary>
+        protected override void OnRenderProcessTerminated(IWebBrowser chromiumWebBrowser, IBrowser browser, CefTerminationStatus status, int errorCode, string errorMessage)
+        {
+            if (crashed != null) crashed();
+        }
+
+        /// <summary>Links to .user.js files (Greasy Fork's Install button) offer to install the script instead of showing its code.</summary>
+        protected override bool OnBeforeBrowse(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request, bool userGesture, bool isRedirect)
+        {
+            string url = request.Url ?? "";
+            if (userScript != null && frame.IsMain && Uri.TryCreate(url, UriKind.Absolute, out var u)
+                && (u.Scheme == "https" || u.Scheme == "http") && u.AbsolutePath.EndsWith(".user.js", StringComparison.OrdinalIgnoreCase))
+            {
+                userScript(url);
+                return true;
+            }
+            return false;
+        }
 
         protected override IResourceRequestHandler GetResourceRequestHandler(
             IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request,
             bool isNavigation, bool isDownload, string requestInitiator, ref bool disableDefaultHandling)
         {
-            return new FacetResourceHandler(prefs);
+            return handler;
         }
     }
 
@@ -125,12 +153,14 @@ namespace Facet
         protected override ICookieAccessFilter GetCookieAccessFilter(
             IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request)
         {
-            return prefs.BlockThirdPartyCookies ? new ThirdPartyCookieFilter() : null;
+            return prefs.BlockThirdPartyCookies ? ThirdPartyCookieFilter.Shared : null;
         }
     }
 
     public class ThirdPartyCookieFilter : ICookieAccessFilter
     {
+        public static readonly ThirdPartyCookieFilter Shared = new ThirdPartyCookieFilter();
+
         // Only cookies from known tracking hosts are refused when they are third-party. Blocking every third-party
         // cookie breaks sign-in flows, embedded payments and single sign-on on many sites.
         private bool Allowed(IBrowser browser, IRequest request)

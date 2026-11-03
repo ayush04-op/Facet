@@ -20,6 +20,7 @@ namespace Facet
             this.p = p; this.prefs = prefs; this.open = open;
             Background = GridBrush();
             var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = column };
+            Scrolling.Smooth(scroll);
             Children.Add(scroll);
             Rebuild();
         }
@@ -35,6 +36,7 @@ namespace Facet
                 dc.DrawLine(pen, new Point(0.5, 0), new Point(0.5, 48));
             }
             var br = new DrawingBrush(back) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 48, 48), ViewportUnits = BrushMappingMode.Absolute };
+            br.Freeze(); // frozen brushes render without change tracking
             return br;
         }
 

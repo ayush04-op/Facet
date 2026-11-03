@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace Facet
 {
@@ -31,7 +32,7 @@ namespace Facet
         {
             Background = on ? p.Accent : p.Line;
             double to = on ? 18 : 0;
-            if (animate) shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(180)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            if (animate) shift.BeginAnimation(TranslateTransform.XProperty, Anim.To(to, 200));
             else shift.X = to;
         }
 
@@ -45,13 +46,103 @@ namespace Facet
         private readonly Palette p;
         public Kit(Palette p) { this.p = p; }
 
-        public static void FadeIn(UIElement e)
+        // How the transitions stay smooth:
+        //  - An element that was just built starts invisible, and its animation starts only after WPF has laid it out
+        //    and drawn it once. Starting straight away let a heavy page (Settings) spend the first ~100 ms of its own
+        //    animation being built, so it appeared already part-way through: a hitch at the start.
+        //  - While it moves, the element is drawn from a bitmap cache, so each frame the GPU just moves and fades one
+        //    picture instead of re-rendering every line of text. The cache is dropped afterwards to keep text crisp.
+
+        private static void Smooth(UIElement e, AnimationTimeline driver, Action start, bool fresh)
         {
+            // EnableClearType keeps text identical inside the cache, so nothing changes when it is dropped
+            e.CacheMode = new BitmapCache { SnapsToDevicePixels = true, EnableClearType = true };
+            driver.Completed += (s, a) => e.CacheMode = null;
+            if (fresh) e.Dispatcher.BeginInvoke(start, DispatcherPriority.Background);
+            else start();
+        }
+
+        /// <summary>Hides a fresh element until it is ready to animate.</summary>
+        private static void Hold(UIElement e)
+        {
+            e.BeginAnimation(UIElement.OpacityProperty, null);
             e.Opacity = 0;
-            var t = new TranslateTransform(0, 14);
+        }
+
+        public static void FadeIn(UIElement e, Action done = null)
+        {
+            Hold(e);
+            var t = new TranslateTransform(0, 12);
             e.RenderTransform = t;
-            e.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(260)));
-            t.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(300)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            var rise = Anim.To(0, 300);
+            if (done != null) rise.Completed += (s, a) => done();
+            Smooth(e, rise, () =>
+            {
+                e.BeginAnimation(UIElement.OpacityProperty, Anim.To(1, 220));
+                t.BeginAnimation(TranslateTransform.YProperty, rise);
+            }, true);
+        }
+
+        /// <summary>The reverse of FadeIn: fades and sinks a little, then calls done.</summary>
+        public static void FadeOut(UIElement e, Action done, bool slide = true)
+        {
+            var fade = Anim.To(0, 180, Anim.In);
+            fade.Completed += (s, a) => done();
+            Smooth(e, fade, () =>
+            {
+                if (slide)
+                {
+                    var t = new TranslateTransform(0, 0);
+                    e.RenderTransform = t;
+                    t.BeginAnimation(TranslateTransform.YProperty, Anim.To(8, 180, Anim.In));
+                }
+                e.BeginAnimation(UIElement.OpacityProperty, fade);
+            }, false);
+        }
+
+        /// <summary>A sub-page arriving from the right, over the page it was opened from. done runs once it has landed.</summary>
+        public static void SlideIn(UIElement e, Action done)
+        {
+            Hold(e);
+            var t = new TranslateTransform(48, 0);
+            e.RenderTransform = t;
+            var slide = Anim.To(0, 300);
+            slide.Completed += (s, a) => done();
+            Smooth(e, slide, () =>
+            {
+                e.BeginAnimation(UIElement.OpacityProperty, Anim.To(1, 200));
+                t.BeginAnimation(TranslateTransform.XProperty, slide);
+            }, true);
+        }
+
+        /// <summary>The reverse of SlideIn: back out to the right, uncovering the page underneath.</summary>
+        public static void SlideOut(UIElement e, Action done)
+        {
+            var t = new TranslateTransform(0, 0);
+            e.RenderTransform = t;
+            var slide = Anim.To(48, 220, Anim.In);
+            slide.Completed += (s, a) => done();
+            Smooth(e, slide, () =>
+            {
+                t.BeginAnimation(TranslateTransform.XProperty, slide);
+                e.BeginAnimation(UIElement.OpacityProperty, Anim.To(0, 220, Anim.In));
+            }, false);
+        }
+
+        /// <summary>Scales a card up from 96% while it fades in, growing out of the given corner (0..1 on each axis).</summary>
+        public static void PopIn(UIElement e, Point origin)
+        {
+            Hold(e);
+            var s = new ScaleTransform(0.96, 0.96);
+            e.RenderTransform = s;
+            e.RenderTransformOrigin = origin;
+            var grow = Anim.To(1, 220);
+            Smooth(e, grow, () =>
+            {
+                e.BeginAnimation(UIElement.OpacityProperty, Anim.To(1, 160));
+                s.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+                s.BeginAnimation(ScaleTransform.ScaleYProperty, Anim.To(1, 220));
+            }, true);
         }
 
         public UIElement Section(string name)
@@ -127,6 +218,23 @@ namespace Facet
             return Hoverable(g, () => sw.Toggle());
         }
 
+        /// <summary>A switch row with one extra action button (the Extensions page's remove button).</summary>
+        public UIElement ToggleAction(string icon, string title, string sub, bool value, Action<bool> onChange, string actionIcon, Action action)
+        {
+            var g = Base(icon);
+            g.Children.Add(Texts(title, sub));
+            var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var btn = Ui.IconButton(p, actionIcon, 17, action, 32);
+            btn.Margin = new Thickness(10, 0, 8, 0);
+            right.Children.Add(btn);
+            var sw = new SwitchControl(p, value) { VerticalAlignment = VerticalAlignment.Center };
+            sw.Changed = onChange;
+            right.Children.Add(sw);
+            Grid.SetColumn(right, 2);
+            g.Children.Add(right);
+            return new Border { Child = g };
+        }
+
         public UIElement Value(string icon, string title, string value, string sub, Action click)
         {
             var g = Base(icon);
@@ -177,6 +285,7 @@ namespace Facet
             root.Children.Add(head);
             body = new StackPanel { Width = 640, Margin = new Thickness(0, 0, 0, 40) };
             var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new Grid { Children = { body }, Margin = new Thickness(24, 0, 24, 0) } };
+            Scrolling.Smooth(scroll);
             body.HorizontalAlignment = HorizontalAlignment.Center;
             Grid.SetRow(scroll, 1);
             root.Children.Add(scroll);

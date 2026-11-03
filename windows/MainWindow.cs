@@ -8,16 +8,24 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using CefSharp;
 
 namespace Facet
 {
-    public class MainWindow : Window
+    public partial class MainWindow : Window
     {
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int index);
+
+        /// <summary>Height of the tab row, which doubles as the window's title bar.</summary>
+        private const double CaptionHeight = 42;
 
         private readonly Prefs prefs = Prefs.Load();
         private Palette p;
@@ -29,37 +37,64 @@ namespace Facet
         private StackPanel tabStrip;
         private TextBox address;
         private ProgressBar progress;
-        private Border backBtn, forwardBtn, reloadBtn, lockBox, starBox, menuBtn, shieldBox;
+        private Border backBtn, forwardBtn, reloadBtn, lockBox, starBox, menuBtn, shieldBox, maxBtn;
         private TextBlock shieldCount;
         private NewTabView newTabView;
         private DispatcherTimer toastTimer;
         private readonly string startUrl;
 
+        // tab chips, so a new tab can grow in and a closed one can shrink away
+        private readonly Dictionary<BrowserTab, Border> chips = new Dictionary<BrowserTab, Border>();
+        private readonly HashSet<BrowserTab> closing = new HashSet<BrowserTab>();
+        private BrowserTab growing;
+        private int modalGen;
+
         public MainWindow(string startUrl)
         {
             this.startUrl = startUrl;
             Title = "Facet";
+            try { Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/Facet.ico")); } catch { }
             Width = 1200; Height = 800; MinWidth = 720; MinHeight = 480;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             FontFamily = Fonts.Sans;
+            UseLayoutRounding = true;
+            // Sharp UI text: ClearType everywhere, including text over see-through backgrounds (the address bar),
+            // where WPF would otherwise drop to greyscale.
+            TextOptions.SetTextRenderingMode(this, TextRenderingMode.ClearType);
+            RenderOptions.SetClearTypeHint(this, ClearTypeHint.Enabled);
 
+            // No Windows title bar: the tab row is the title bar, like Chrome. Dragging empty space there moves
+            // the window, double-clicking maximises it, and Windows still handles snapping, resizing and the shadow.
+            WindowChrome.SetWindowChrome(this, new WindowChrome
+            {
+                CaptionHeight = CaptionHeight,
+                ResizeBorderThickness = new Thickness(6),
+                GlassFrameThickness = new Thickness(0, 0, 0, 1),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false
+            });
+            StateChanged += (s, e) => FitToState();
+
+            Extensions.Load();
             BuildChrome();
 
             if (!string.IsNullOrEmpty(startUrl)) NewTab(startUrl, false);
             else if (prefs.RestoreTabs && prefs.SessionUrls.Count > 0)
             {
-                foreach (var u in prefs.SessionUrls) NewTab(u, false, false);
+                // only the selected tab loads now; the others load when first opened
+                foreach (var u in prefs.SessionUrls) NewTab(u, false, false, true);
                 SelectTab(tabs[Math.Max(0, Math.Min(prefs.SessionSelected, tabs.Count - 1))]);
             }
             else NewTab(null, false);
 
             SourceInitialized += (s, e) => ApplyTitleBar();
-            SizeChanged += (s, e) => RefreshTabs();
+            SizeChanged += (s, e) => QueueRefreshTabs();
             Closing += (s, e) => SaveState();
             Loaded += (s, e) =>
             {
                 if (Environment.GetEnvironmentVariable("FACET_SMOKE") == "1") RunSmoke();
                 else AutoCheckUpdates();
+                ListenForLinks();
             };
         }
 
@@ -72,14 +107,54 @@ namespace Facet
                 var h = new WindowInteropHelper(this).Handle;
                 int v = p.Dark ? 1 : 0;
                 DwmSetWindowAttribute(h, 20, ref v, 4);
+                int round = 2; // DWMWCP_ROUND: Windows 11 rounded corners
+                DwmSetWindowAttribute(h, 33, ref round, 4);
             }
-            catch { /* older Windows: keep the default title bar */ }
+            catch { /* older Windows: square corners */ }
+        }
+
+        /// <summary>A maximised window without a title bar hangs over the screen edge by its frame, so pad it back in.</summary>
+        private void FitToState()
+        {
+            bool max = WindowState == WindowState.Maximized;
+            if (root != null)
+            {
+                if (max)
+                {
+                    var f = SystemParameters.WindowResizeBorderThickness;
+                    double pad = GetSystemMetrics(92 /* SM_CXPADDEDBORDER */) / VisualTreeHelper.GetDpi(this).DpiScaleX;
+                    root.Margin = new Thickness(f.Left + pad, f.Top + pad, f.Right + pad, f.Bottom + pad);
+                }
+                else root.Margin = new Thickness(0);
+            }
+            if (maxBtn != null) maxBtn.Child = CaptionGlyph(max ? "restore" : "maximize", p.Ink);
+        }
+
+        // Sized like Windows 11 and Chrome: 46 px wide, the full height of the tab strip, 10 px glyphs drawn with 1 px lines.
+        private const double CaptionGlyphBox = 20, CaptionStroke = 1.2;
+
+        private static UIElement CaptionGlyph(string icon, Brush color) { return Icons.Make(icon, color, CaptionGlyphBox, CaptionStroke); }
+
+        private Border CaptionButton(string icon, Action click, bool danger = false)
+        {
+            var b = new Border { Width = 46, Height = CaptionHeight, VerticalAlignment = VerticalAlignment.Top, Child = CaptionGlyph(icon, p.Ink) };
+            Ui.Button(b, Brushes.Transparent, danger ? Ui.B("#C42B1C") : p.Hover, click, false);
+            if (danger)
+            {
+                b.MouseEnter += (s, e) => b.Child = CaptionGlyph(icon, Brushes.White);
+                b.MouseLeave += (s, e) => b.Child = CaptionGlyph(icon, p.Ink);
+            }
+            WindowChrome.SetIsHitTestVisibleInChrome(b, true);
+            return b;
         }
 
         private void BuildChrome()
         {
             p = Palette.For(prefs.Theme);
             Background = p.Bg;
+            // every ScrollBar in the window gets the paper look; websites get the same via PageScript
+            Resources[typeof(ScrollBar)] = Scrolling.ScrollBarStyle(p);
+            Extensions.ScrollbarScript = Scrolling.PageScript(p);
             if (host != null) host.Children.Clear();
             if (IsLoaded || new WindowInteropHelper(this).Handle != IntPtr.Zero) ApplyTitleBar();
 
@@ -89,13 +164,30 @@ namespace Facet
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            // tab strip
+            // tab strip, which is also the title bar: tabs on the left, empty space to drag, window buttons on the right
+            var titleRow = titleRowEl = new Grid { Height = CaptionHeight };
+            titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             tabStrip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 8, 10, 2) };
-            Grid.SetRow(tabStrip, 0);
-            root.Children.Add(tabStrip);
+            tabsKey = null;
+            WindowChrome.SetIsHitTestVisibleInChrome(tabStrip, true);
+            titleRow.Children.Add(tabStrip);
+            var caption = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
+            caption.Children.Add(CaptionButton("minimize", () => SystemCommands.MinimizeWindow(this)));
+            maxBtn = CaptionButton("maximize", () =>
+            {
+                if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this); else SystemCommands.MaximizeWindow(this);
+            });
+            caption.Children.Add(maxBtn);
+            caption.Children.Add(CaptionButton("close", () => SystemCommands.CloseWindow(this), true));
+            Grid.SetColumn(caption, 2);
+            titleRow.Children.Add(caption);
+            Grid.SetRow(titleRow, 0);
+            root.Children.Add(titleRow);
 
             // toolbar
-            var bar = new Grid { Margin = new Thickness(10, 4, 10, 8) };
+            var bar = toolbarEl = new Grid { Margin = new Thickness(10, 4, 10, 8) };
             for (int i = 0; i < 3; i++) bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -106,7 +198,8 @@ namespace Facet
             Grid.SetColumn(forwardBtn, 1); Grid.SetColumn(reloadBtn, 2);
             bar.Children.Add(backBtn); bar.Children.Add(forwardBtn); bar.Children.Add(reloadBtn);
 
-            var pill = Ui.Box(p.Surface, 19, p.Line);
+            var pillLine = new SolidColorBrush(p.Line.Color);
+            var pill = Ui.Box(p.Surface, 19, pillLine, 1.5);
             pill.Height = 38; pill.Margin = new Thickness(6, 0, 6, 0);
             var pg = new Grid();
             pg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
@@ -120,7 +213,12 @@ namespace Facet
                 Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = p.Ink, CaretBrush = p.Ink,
                 FontFamily = Fonts.Sans, FontSize = 14, VerticalContentAlignment = VerticalAlignment.Center, SelectionBrush = p.Accent
             };
-            address.GotKeyboardFocus += (s, e) => address.Dispatcher.BeginInvoke(new Action(() => address.SelectAll()));
+            address.GotKeyboardFocus += (s, e) =>
+            {
+                Anim.Color(pillLine, p.Accent.Color, 160);
+                address.Dispatcher.BeginInvoke(new Action(() => address.SelectAll()));
+            };
+            address.LostKeyboardFocus += (s, e) => Anim.Color(pillLine, p.Line.Color, 200);
             address.KeyDown += (s, e) =>
             {
                 if (e.Key == Key.Enter) { Navigate(address.Text); e.Handled = true; }
@@ -163,6 +261,7 @@ namespace Facet
             modal = new Grid { Visibility = Visibility.Collapsed };
             toastHost = new Grid { IsHitTestVisible = false };
             content.Children.Add(host);
+            content.Children.Add(BuildFindBar());
             content.Children.Add(overlay);
             content.Children.Add(modal);
             content.Children.Add(toastHost);
@@ -172,6 +271,7 @@ namespace Facet
             foreach (var t in tabs) host.Children.Add(t.Browser);
             host.Children.Add(newTabView);
             Content = root;
+            FitToState();
 
             if (current != null) SelectTab(current);
             else RefreshTabs();
@@ -179,16 +279,18 @@ namespace Facet
 
         // ------------------------------------------------------------ tabs
 
-        private BrowserTab NewTab(string url, bool isPrivate, bool select = true)
+        private BrowserTab NewTab(string url, bool isPrivate, bool select = true, bool lazy = false)
         {
-            var t = new BrowserTab(prefs, isPrivate, url);
+            var t = new BrowserTab(prefs, isPrivate, url, lazy);
             t.Changed += () => OnTabChanged(t);
             t.PopupRequested += u => NewTab(u, t.IsPrivate);
             t.Shortcut += Shortcut;
             t.DownloadFinished += n => Toast("Downloaded " + n);
+            HookTab(t);
             tabs.Add(t);
             host.Children.Insert(0, t.Browser);
             t.Browser.Visibility = Visibility.Collapsed;
+            if (IsLoaded) growing = t;
             if (select) SelectTab(t);
             else RefreshTabs();
             return t;
@@ -201,21 +303,70 @@ namespace Facet
                 newTabView.Visibility = t.ShowsNewTab ? Visibility.Visible : Visibility.Collapsed;
                 RefreshToolbar();
             }
-            RefreshTabs();
+            QueueRefreshTabs();
+        }
+
+        private bool tabsQueued;
+        private string tabsKey;
+
+        /// <summary>A page load fires many changes in a row; redraw the tab strip once for all of them.</summary>
+        private void QueueRefreshTabs()
+        {
+            if (tabsQueued) return;
+            tabsQueued = true;
+            Dispatcher.BeginInvoke(new Action(() => { tabsQueued = false; RefreshTabs(); }), DispatcherPriority.Background);
         }
 
         private void SelectTab(BrowserTab t)
         {
+            bool switched = t != current;
             current = t;
-            foreach (var x in tabs) x.Browser.Visibility = x == t ? Visibility.Visible : Visibility.Collapsed;
-            if (t.ShowsNewTab) { newTabView.Rebuild(); newTabView.Visibility = Visibility.Visible; }
-            else newTabView.Visibility = Visibility.Collapsed;
+            // Going to a tab means leaving Settings, the same as in Chrome.
+            ClosePages();
+            foreach (var x in tabs)
+            {
+                x.Browser.Visibility = x == t ? Visibility.Visible : Visibility.Collapsed;
+                x.SetHidden(x != t);
+            }
+            t.Activate();
+            if (t.ShowsNewTab)
+            {
+                newTabView.Rebuild();
+                newTabView.Visibility = Visibility.Visible;
+                if (switched && IsLoaded) Kit.FadeIn(newTabView);
+            }
+            else
+            {
+                newTabView.Visibility = Visibility.Collapsed;
+                if (switched && IsLoaded) Anim.Opacity(t.Browser, 0, 1, 160);
+            }
+            if (switched)
+            {
+                CloseFind();
+                // the address bar may still hold focus (and the text) from the tab we just left
+                address.Text = t.Url ?? "";
+                if (!t.ShowsNewTab && address.IsKeyboardFocused) t.Browser.Focus();
+            }
             RefreshToolbar();
             RefreshTabs();
             if (t.ShowsNewTab) { address.Dispatcher.BeginInvoke(new Action(() => { address.Focus(); }), DispatcherPriority.Background); }
         }
 
+        /// <summary>Shrinks the tab's chip away, then closes the tab.</summary>
         private void CloseTab(BrowserTab t)
+        {
+            if (!tabs.Contains(t) || closing.Contains(t)) return;
+            Border chip;
+            if (!IsLoaded || !chips.TryGetValue(t, out chip)) { RemoveTab(t); return; }
+            closing.Add(t);
+            chip.IsHitTestVisible = false;
+            var shrink = Anim.To(0, 150, Anim.In);
+            shrink.Completed += (s, e) => { closing.Remove(t); RemoveTab(t); };
+            chip.BeginAnimation(WidthProperty, shrink);
+            chip.BeginAnimation(OpacityProperty, Anim.To(0, 120, Anim.In));
+        }
+
+        private void RemoveTab(BrowserTab t)
         {
             int i = tabs.IndexOf(t);
             if (i < 0) return;
@@ -230,15 +381,35 @@ namespace Facet
         private void RefreshTabs()
         {
             if (tabStrip == null) return;
+            // Most tab changes (loading started/stopped, back/forward state) don't change the strip: skip the rebuild.
+            var sig = new System.Text.StringBuilder();
+            sig.Append((int)ActualWidth).Append('|');
+            foreach (var t in tabs)
+                sig.Append(t.GetHashCode()).Append(t == current ? '*' : ' ').Append(closing.Contains(t) ? 'x' : ' ')
+                   .Append(t.ShowsNewTab ? "" : t.Title).Append('\n');
+            string key = sig.ToString();
+            if (growing == null && key == tabsKey) return;
+            tabsKey = key;
             tabStrip.Children.Clear();
-            double avail = Math.Max(300, ActualWidth - 120);
-            double w = Math.Max(80, Math.Min(220, avail / Math.Max(1, tabs.Count)));
+            chips.Clear();
+            // leave room for the new-tab button, the window buttons and some empty title bar to drag
+            double avail = Math.Max(300, ActualWidth - 260);
+            int shown = Math.Max(1, tabs.Count - closing.Count);
+            double w = Math.Max(80, Math.Min(220, avail / shown));
             foreach (var t in tabs)
             {
                 var tab = t;
+                if (closing.Contains(tab)) continue;
                 bool sel = tab == current;
                 var chip = Ui.Box(sel ? p.Surface : Brushes.Transparent, 10, sel ? p.Line : null);
                 chip.Width = w; chip.Height = 32; chip.Margin = new Thickness(0, 0, 4, 0);
+                chips[tab] = chip;
+                if (tab == growing)
+                {
+                    growing = null;
+                    chip.BeginAnimation(WidthProperty, new DoubleAnimation(0, w, TimeSpan.FromMilliseconds(200)) { EasingFunction = Anim.Out });
+                    Anim.Opacity(chip, 0, 1, 200);
+                }
                 var g = new Grid { Margin = new Thickness(10, 0, 4, 0) };
                 g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -266,6 +437,8 @@ namespace Facet
         private void RefreshToolbar()
         {
             if (current == null) return;
+            // shown on the taskbar and in Alt+Tab now that the window has no title bar of its own
+            Title = current.ShowsNewTab || string.IsNullOrWhiteSpace(current.Title) ? "Facet" : current.Title + " - Facet";
             backBtn.Opacity = current.CanBack ? 1 : 0.35;
             forwardBtn.Opacity = current.CanForward ? 1 : 0.35;
             reloadBtn.Child = Icons.Make(current.Loading ? "close" : "refresh", p.Ink, current.Loading ? 17 : 19);
@@ -285,6 +458,8 @@ namespace Facet
         {
             if (current == null) return;
             var url = Urls.Resolve(input, prefs.SearchEngine);
+            // Browsing from the address bar leaves Settings, otherwise the page loads hidden behind it.
+            ClosePages();
             current.Go(url);
             current.Browser.Focus();
         }
@@ -325,6 +500,16 @@ namespace Facet
                 case "forward": if (current != null && current.CanForward) current.Browser.Forward(); break;
                 case "nexttab": Cycle(1); break;
                 case "prevtab": Cycle(-1); break;
+                case "find": OpenFind(); break;
+                case "findnext": FindNext(true); break;
+                case "print": Print(); break;
+                case "zoomin": ZoomBy(1); break;
+                case "zoomout": ZoomBy(-1); break;
+                case "zoomreset": ZoomBy(0); break;
+                case "fullscreen": SetFullscreen(!fullscreen); break;
+                case "savepage": if (current != null && !current.ShowsNewTab) Download(current, current.Url); break;
+                case "source": ViewSource(current); break;
+                case "devtools": if (current != null && !current.ShowsNewTab) Inspect(current, 0, 0); break;
             }
         }
 
@@ -338,6 +523,7 @@ namespace Facet
         protected override void OnPreviewKeyDown(KeyEventArgs e)
         {
             base.OnPreviewKeyDown(e);
+            if (asking) return; // an open question takes Enter and Esc itself
             bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
             bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
             if (ctrl && e.Key == Key.T) { Shortcut(shift ? "private" : "newtab"); e.Handled = true; }
@@ -346,6 +532,18 @@ namespace Facet
             else if (ctrl && e.Key == Key.D) { Shortcut("bookmark"); e.Handled = true; }
             else if (ctrl && e.Key == Key.Tab) { Shortcut(shift ? "prevtab" : "nexttab"); e.Handled = true; }
             else if (e.Key == Key.F5) { Shortcut("reload"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.F) { Shortcut("find"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.P) { Shortcut("print"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.S) { Shortcut("savepage"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.U) { Shortcut("source"); e.Handled = true; }
+            else if ((ctrl && shift && e.Key == Key.I) || e.Key == Key.F12) { Shortcut("devtools"); e.Handled = true; }
+            else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { Shortcut("zoomin"); e.Handled = true; }
+            else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { Shortcut("zoomout"); e.Handled = true; }
+            else if (ctrl && (e.Key == Key.D0 || e.Key == Key.NumPad0)) { Shortcut("zoomreset"); e.Handled = true; }
+            else if (e.Key == Key.F11) { Shortcut("fullscreen"); e.Handled = true; }
+            else if (e.Key == Key.F3) { Shortcut("findnext"); e.Handled = true; }
+            else if (e.Key == Key.Escape && findBar != null && findBar.Visibility == Visibility.Visible) { CloseFind(); e.Handled = true; }
+            else if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; }
             else if (e.Key == Key.Escape && pages.Count > 0) { PopPage(); e.Handled = true; }
         }
 
@@ -356,7 +554,7 @@ namespace Facet
             var pop = new Popup { PlacementTarget = menuBtn, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, HorizontalOffset = -200 };
             var card = Ui.Box(p.Bg, 14, p.Line);
             card.Width = 244; card.Margin = new Thickness(10);
-            card.Effect = new DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.25, Color = Colors.Black };
+            card.Effect = new DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.25, Color = Colors.Black, RenderingBias = RenderingBias.Performance };
             var sp = new StackPanel { Margin = new Thickness(6) };
             Action<string, string, Action> item = (icon, text, act) =>
             {
@@ -373,40 +571,99 @@ namespace Facet
             item("plus", "New tab", () => NewTab(null, false));
             item("private", "New private tab", () => NewTab(null, true));
             if (current != null && !current.ShowsNewTab)
+            {
                 item("star", IsBookmarked(current.Url) ? "Remove bookmark" : "Add bookmark", ToggleBookmark);
+                item("link", "Copy link", () => CopyText(current.Url, "Link copied"));
+                item("search", "Find in page", OpenFind);
+                item("print", "Print", Print);
+                item("zoom", "Zoom (" + current.Zoom + "%)", ShowZoom);
+            }
             item("download", "Downloads folder", () =>
             {
                 try { System.Diagnostics.Process.Start("explorer.exe", System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")); } catch { }
             });
+            item("puzzle", "Extensions", ShowExtensions);
             item("settings", "Settings", ShowSettings);
             item("refresh", "Software update", ShowUpdates);
             card.Child = sp;
             pop.Child = card;
             pop.IsOpen = true;
+            Kit.PopIn(card, new Point(1, 0));
         }
 
-        private void PushPage(UIElement page)
+        private void PushPage(UIElement page, bool animate = true)
         {
+            bool first = pages.Count == 0;
             pages.Add(page);
-            overlay.Children.Clear();
-            overlay.Children.Add(page);
-            overlay.Visibility = Visibility.Visible;
-            Kit.FadeIn(page);
+            var o = overlay;
+            // A sub-page slides in on top of the page it came from, which stays put underneath until it is covered.
+            // (Clearing first would flash the web page through for a frame: the "blink".)
+            if (first) o.Children.Clear();
+            o.Children.Add(page);
+            o.Visibility = Visibility.Visible;
+            Action covered = () =>
+            {
+                if (pages.Count == 0 || pages[pages.Count - 1] != page) return;
+                for (int i = o.Children.Count - 1; i >= 0; i--) if (o.Children[i] != page) o.Children.RemoveAt(i);
+            };
+            if (!animate) { covered(); CoverHost(); }
+            else if (first) Kit.FadeIn(page, CoverHost);
+            else Kit.SlideIn(page, covered);
         }
 
-        private void PopPage()
+        /// <summary>Once a page fully covers the web page, hide it: Chromium stops painting behind Settings,
+        /// which would otherwise compete with Settings' own animations for every frame.</summary>
+        private void CoverHost()
+        {
+            if (pages.Count > 0) host.Visibility = Visibility.Hidden;
+        }
+
+        private void PopPage() { Dismiss(false); }
+
+        /// <summary>Leaves Settings / Software update entirely, for example when the person goes back to browsing.</summary>
+        private void ClosePages()
+        {
+            CloseModal();
+            Dismiss(true);
+        }
+
+        private void Dismiss(bool all)
         {
             if (pages.Count == 0) return;
-            pages.RemoveAt(pages.Count - 1);
-            overlay.Children.Clear();
-            if (pages.Count == 0) { overlay.Visibility = Visibility.Collapsed; RefreshToolbar(); return; }
-            overlay.Children.Add(pages[pages.Count - 1]);
-            var s = pages[pages.Count - 1] as SettingsPage;
-            if (s != null) s.Rebuild();
+            var top = pages[pages.Count - 1];
+            if (all) pages.Clear(); else pages.RemoveAt(pages.Count - 1);
+            var o = overlay;
+            o.Children.Clear();
+            bool back = pages.Count > 0;
+            if (back)
+            {
+                // the page we return to is already built: refresh its values in place, without animating it again
+                o.Children.Add(pages[pages.Count - 1]);
+                var s = pages[pages.Count - 1] as SettingsPage;
+                if (s != null) s.Rebuild();
+            }
+            else
+            {
+                host.Visibility = Visibility.Visible; // the web page is what the leaving page fades to
+                RefreshToolbar();
+            }
+            // The page that is leaving stays on top and ignores the mouse while it goes: a sub-page slides back
+            // out to the right, the last page fades to reveal the web page.
+            top.IsHitTestVisible = false;
+            o.Children.Add(top);
+            Action gone = () =>
+            {
+                o.Children.Remove(top);
+                if (o == overlay && pages.Count == 0 && o.Children.Count == 0) o.Visibility = Visibility.Collapsed;
+            };
+            if (back) Kit.SlideOut(top, gone); else Kit.FadeOut(top, gone);
         }
 
-        private void ShowSettings()
+        private void ShowSettings() { OpenSettings(true); }
+
+        private void OpenSettings(bool animate)
         {
+            if (pages.Count > 0 && pages[pages.Count - 1] is SettingsPage) return;
             PushPage(new SettingsPage(p, prefs, PopPage,
                 () => { /* options are read on the next request */ },
                 () => Choose("Search engine", Array.ConvertAll(Urls.Engines, e => e.Name), Array.FindIndex(Urls.Engines, e => e.Id == prefs.SearchEngine), i =>
@@ -418,10 +675,11 @@ namespace Facet
                     prefs.Theme = i; prefs.Save();
                     pages.Clear();
                     BuildChrome();
-                    ShowSettings();
+                    // reopen Settings in the new colours straight away, without the opening fade
+                    OpenSettings(false);
                 }),
                 () => Choose("Clear cookies, cache and site data?", new[] { "Clear everything", "Cancel" }, -1, i => { if (i == 0) ClearData(); }),
-                ShowUpdates));
+                ShowUpdates, ShowExtensions), animate);
         }
 
         private void RefreshSettings()
@@ -452,8 +710,30 @@ namespace Facet
 
         private void CloseModal()
         {
+            if (modal.Visibility != Visibility.Visible) return;
+            int gen = ++modalGen;
+            var m = modal;
+            m.IsHitTestVisible = false;
+            Kit.FadeOut(m, () =>
+            {
+                if (gen != modalGen) return; // another dialog opened meanwhile
+                m.Children.Clear();
+                m.Visibility = Visibility.Collapsed;
+            }, false);
+        }
+
+        private void OpenModal(Border scrim, Border card)
+        {
+            modalGen++;
+            modal.BeginAnimation(OpacityProperty, null);
+            modal.Opacity = 1;
+            modal.IsHitTestVisible = true;
             modal.Children.Clear();
-            modal.Visibility = Visibility.Collapsed;
+            modal.Children.Add(scrim);
+            modal.Children.Add(card);
+            modal.Visibility = Visibility.Visible;
+            Anim.Opacity(scrim, 0, 1, 180);
+            Kit.PopIn(card, new Point(0.5, 0.5));
         }
 
         private Border Scrim(out Border card, double width)
@@ -487,11 +767,7 @@ namespace Facet
                 sp.Children.Add(row);
             }
             card.Child = sp;
-            modal.Children.Clear();
-            modal.Children.Add(scrim);
-            modal.Children.Add(card);
-            modal.Visibility = Visibility.Visible;
-            Kit.FadeIn(card);
+            OpenModal(scrim, card);
         }
 
         private void Input(string title, string hint, string initial, bool secret, Action<string> save)
@@ -525,11 +801,7 @@ namespace Facet
             buttons.Children.Add(saveBtn);
             sp.Children.Add(buttons);
             card.Child = sp;
-            modal.Children.Clear();
-            modal.Children.Add(scrim);
-            modal.Children.Add(card);
-            modal.Visibility = Visibility.Visible;
-            Kit.FadeIn(card);
+            OpenModal(scrim, card);
             field.Dispatcher.BeginInvoke(new Action(() => field.Focus()), DispatcherPriority.Background);
         }
 
@@ -545,7 +817,7 @@ namespace Facet
             Kit.FadeIn(t);
             if (toastTimer != null) toastTimer.Stop();
             toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.6) };
-            toastTimer.Tick += (s, e) => { toastTimer.Stop(); toastHost.Children.Clear(); };
+            toastTimer.Tick += (s, e) => { toastTimer.Stop(); Kit.FadeOut(t, () => toastHost.Children.Remove(t)); };
             toastTimer.Start();
         }
 

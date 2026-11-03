@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <ApplicationIcon>Facet.ico</ApplicationIcon>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -19,7 +18,11 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Facet.ico</ApplicationIcon>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Precompiled code: faster start-up, and no JIT work while the first windows and pages open. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +34,8 @@
   <ItemGroup>
     <!-- The same Prism fonts the Android app uses, embedded in the executable. -->
     <Resource Include="..\app\src\main\assets\fonts\*.otf" Link="Fonts\%(Filename)%(Extension)" />
+    <!-- The Facet logo, for the window, taskbar and Alt+Tab. -->
+    <Resource Include="Facet.ico" />
   </ItemGroup>
 
 </Project>

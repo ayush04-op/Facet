@@ -116,27 +116,26 @@ jobs:
             t="${{ github.event.inputs.release_tag }}"
             echo "name=${t#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=1.0" >> "$GITHUB_OUTPUT"
+            echo "name=2.0" >> "$GITHUB_OUTPUT"
           fi
 
+      # The browser, its uninstaller, the update zip and the paper installer (Facet-v<version>-Setup.exe), all in dist/
       - name: Build Facet for Windows
-        shell: bash
+        shell: pwsh
         run: |
-          set +e
-          dotnet publish windows/Facet.Windows.csproj -c Release -r win-x64 --self-contained -p:Version=${{ steps.ver.outputs.name }} -o publish 2>&1 | tee build.log
-          code=${PIPESTATUS[0]}
-          if [ "$code" -ne 0 ]; then
-            msg=$(grep -E 'error ' build.log | sort -u | head -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            echo "::error title=Windows build errors::${msg}"
-          fi
-          exit $code
+          pwsh windows/build.ps1 -Version "${{ steps.ver.outputs.name }}" -Out dist 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "dist/Facet-v${{ steps.ver.outputs.name }}-Setup.exe")) {
+            $msg = (Select-String -Path build.log -Pattern 'error ' | ForEach-Object { $_.Line } | Sort-Object -Unique | Select-Object -First 60) -join '%0A'
+            Write-Output "::error title=Windows build errors::$msg"
+            exit 1
+          }
 
       - name: Smoke test (opens real sites with the built browser)
         continue-on-error: true
         shell: pwsh
         run: |
           $env:FACET_SMOKE = "1"
-          $p = Start-Process -FilePath "publish\Facet.exe" -PassThru
+          $p = Start-Process -FilePath "build-work\app\Facet.exe" -PassThru
           if (-not $p.WaitForExit(300000)) { $p.Kill(); Write-Output "::warning title=smoke::Facet did not finish in 5 minutes" }
           $dir = Join-Path $env:LOCALAPPDATA "Facet"
           $f = Join-Path $dir "smoke.txt"
@@ -152,20 +151,39 @@ jobs:
           $log = Join-Path $dir "cef.log"
           if (Test-Path $log) { Write-Output ("::notice title=cef-log::" + ((Get-Content $log -Tail 15) -join '%0A')) }
 
-      - name: Zip it
+      # Installs silently into a temporary folder, checks Facet and its registration are there, then uninstalls and
+      # checks everything is gone. A broken installer fails the build.
+      - name: Installer test (install, then uninstall)
         shell: pwsh
-        run: Compress-Archive -Path publish\* -DestinationPath "Facet-v${{ steps.ver.outputs.name }}-windows-x64.zip"
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "FacetInstallTest"
+          $setup = "dist\Facet-v${{ steps.ver.outputs.name }}-Setup.exe"
+          $p = Start-Process -FilePath $setup -ArgumentList "/silent", "`"/dir=$dir`"" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { Get-Content (Join-Path $env:TEMP "facet-setup-error.txt") -ErrorAction SilentlyContinue; Write-Output "::error title=installer::setup exited with $($p.ExitCode)"; exit 1 }
+          foreach ($f in "Facet.exe", "uninstall.exe", "facet-install.json") { if (-not (Test-Path (Join-Path $dir $f))) { Write-Output "::error title=installer::$f missing after install"; exit 1 } }
+          if (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Facet")) { Write-Output "::error title=installer::no Apps & features entry"; exit 1 }
+          if (-not (Test-Path "HKCU:\Software\Clients\StartMenuInternet\Facet")) { Write-Output "::error title=installer::not registered as a browser"; exit 1 }
+          $u = Start-Process -FilePath (Join-Path $dir "uninstall.exe") -ArgumentList "/silent" -PassThru -Wait
+          Start-Sleep 3
+          if ($u.ExitCode -ne 0 -or (Test-Path (Join-Path $dir "Facet.exe")) -or (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Facet")) {
+            Write-Output "::error title=installer::uninstall left Facet behind (exit $($u.ExitCode))"; exit 1
+          }
+          Write-Output "::notice title=installer::install and uninstall both work"
 
       - uses: actions/upload-artifact@v4
         with:
           name: Facet-v${{ steps.ver.outputs.name }}-windows
-          path: Facet-v*-windows-x64.zip
+          path: |
+            dist/Facet-v*-Setup.exe
+            dist/Facet-v*-windows-x64.zip
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.inputs.release_tag, 'v')
     needs: [build, windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -177,4 +195,6 @@ jobs:
           name: Facet ${{ github.event.inputs.release_tag || github.ref_name }}
           tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
+          body_path: RELEASE_NOTES.md
+          make_latest: true
           files: dist/*
