@@ -76,25 +76,28 @@ namespace Facet
             StateChanged += (s, e) => FitToState();
 
             Extensions.Load();
+            home = HomeConfig.Load();
+            LoadProfile();
+            // still marked running from last time: Facet didn't close properly (crash, power cut)
+            bool crashed = prefs.Running;
+            prefs.Running = true;
+            prefs.Save();
             BuildChrome();
 
-            if (!string.IsNullOrEmpty(startUrl)) NewTab(startUrl, false);
-            else if (prefs.RestoreTabs && prefs.SessionUrls.Count > 0)
-            {
-                // only the selected tab loads now; the others load when first opened
-                foreach (var u in prefs.SessionUrls) NewTab(u, false, false, true);
-                SelectTab(tabs[Math.Max(0, Math.Min(prefs.SessionSelected, tabs.Count - 1))]);
-            }
-            else NewTab(null, false);
+            if (!string.IsNullOrEmpty(startUrl)) { RestoreSession(); NewTab(startUrl, false); }
+            else RestoreSession();
 
             SourceInitialized += (s, e) => ApplyTitleBar();
             SizeChanged += (s, e) => QueueRefreshTabs();
-            Closing += (s, e) => SaveState();
+            Closing += (s, e) => { SaveState(); prefs.Running = false; prefs.Save(); };
             Loaded += (s, e) =>
             {
-                if (Environment.GetEnvironmentVariable("FACET_SMOKE") == "1") RunSmoke();
+                bool smoke = Environment.GetEnvironmentVariable("FACET_SMOKE") == "1";
+                if (smoke) RunSmoke();
                 else AutoCheckUpdates();
                 ListenForLinks();
+                if (!smoke && !prefs.Onboarded) ShowOnboarding();
+                else if (crashed && prefs.RestoreTabs) Toast("Facet didn't close properly last time. Your tabs are back.");
             };
         }
 
@@ -150,7 +153,7 @@ namespace Facet
 
         private void BuildChrome()
         {
-            p = Palette.For(prefs.Theme);
+            p = Palette.For(prefs.Theme, prefs.Accent);
             Background = p.Bg;
             // every ScrollBar in the window gets the paper look; websites get the same via PageScript
             Resources[typeof(ScrollBar)] = Scrolling.ScrollBarStyle(p);
@@ -206,7 +209,14 @@ namespace Facet
             pg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             pg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             pg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            lockBox = new Border { Child = Icons.Make("search", p.Muted, 17) };
+            lockBox = new Border { Child = Icons.Make("search", p.Muted, 17), Width = 32, Height = 32, CornerRadius = new CornerRadius(16) };
+            // the lock opens the site's connection, protection and permission details
+            Ui.Button(lockBox, Brushes.Transparent, p.Hover, () =>
+            {
+                if (current == null || current.ShowsNewTab) { address.Focus(); return; }
+                PushPage(new SiteInfoPage(this, Urls.Host(current.Url), (current.Url ?? "").StartsWith("https://", StringComparison.OrdinalIgnoreCase)));
+            });
+            lockBox.ToolTip = "Site information";
             pg.Children.Add(lockBox);
             address = new TextBox
             {
@@ -256,7 +266,17 @@ namespace Facet
             // content
             var content = new Grid();
             host = new Grid();
-            newTabView = new NewTabView(p, prefs, url => { if (current != null) current.Go(url); });
+            newTabView = new NewTabView(this, new HomeActions
+            {
+                Open = url => { if (current != null) current.Go(url); },
+                Profiles = () => PushPage(new ProfilesPage(this)),
+                Command = ShowCommandBar,
+                Research = ShowResearch,
+                Downloads = ShowDownloads,
+                Private = () => NewTab(null, true),
+                Reminders = () => PushPage(new PermissionRemindersPage(this)),
+                Settings = () => { OpenSettings(true); PushPage(new HomeSettingsPage(this)); },
+            });
             overlay = new Grid { Visibility = Visibility.Collapsed };
             modal = new Grid { Visibility = Visibility.Collapsed };
             toastHost = new Grid { IsHitTestVisible = false };
@@ -281,8 +301,10 @@ namespace Facet
 
         private BrowserTab NewTab(string url, bool isPrivate, bool select = true, bool lazy = false)
         {
-            var t = new BrowserTab(prefs, isPrivate, url, lazy);
+            var t = new BrowserTab(prefs, isPrivate, url, lazy, isPrivate ? null : Profiles.Context(profile));
             t.Changed += () => OnTabChanged(t);
+            t.PageLoaded += () => OnPageLoaded(t);
+            t.ExtensionOffered += (u, n) => { if (n.EndsWith(".user.js", StringComparison.OrdinalIgnoreCase)) OfferUserScript(u); else OfferExtensionFile(u, n); };
             t.PopupRequested += u => NewTab(u, t.IsPrivate);
             t.Shortcut += Shortcut;
             t.DownloadFinished += n => Toast("Downloaded " + n);
@@ -473,16 +495,17 @@ namespace Facet
         private bool IsBookmarked(string url)
         {
             if (string.IsNullOrEmpty(url)) return false;
-            return prefs.Bookmarks.Exists(b => b.Url == url);
+            return data.Bookmarks.Exists(b => b.Url == url);
         }
 
+        /// <summary>Bookmarks belong to the profile in use.</summary>
         private void ToggleBookmark()
         {
             if (current == null || current.ShowsNewTab) return;
             string url = current.Url;
-            if (IsBookmarked(url)) { prefs.Bookmarks.RemoveAll(b => b.Url == url); Toast("Bookmark removed"); }
-            else { prefs.Bookmarks.Insert(0, new Bookmark { Title = current.Title, Url = url }); Toast("Bookmarked"); }
-            prefs.Save();
+            if (IsBookmarked(url)) { data.Bookmarks.RemoveAll(b => b.Url == url); Toast("Bookmark removed"); }
+            else { data.Bookmarks.Insert(0, new Bookmark { Title = current.Title, Url = url }); Toast("Bookmarked in " + profile.Name); }
+            SaveProfileData();
             RefreshToolbar();
         }
 
@@ -510,6 +533,10 @@ namespace Facet
                 case "savepage": if (current != null && !current.ShowsNewTab) Download(current, current.Url); break;
                 case "source": ViewSource(current); break;
                 case "devtools": if (current != null && !current.ShowsNewTab) Inspect(current, 0, 0); break;
+                case "command": ShowCommandBar(); break;
+                case "history": ShowHistory(); break;
+                case "downloads": ShowDownloads(); break;
+                case "reader": ToggleReader(); break;
             }
         }
 
@@ -535,6 +562,10 @@ namespace Facet
             else if (ctrl && e.Key == Key.F) { Shortcut("find"); e.Handled = true; }
             else if (ctrl && e.Key == Key.P) { Shortcut("print"); e.Handled = true; }
             else if (ctrl && e.Key == Key.S) { Shortcut("savepage"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.K) { Shortcut("command"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.H) { Shortcut("history"); e.Handled = true; }
+            else if (ctrl && e.Key == Key.J) { Shortcut("downloads"); e.Handled = true; }
+            else if (e.Key == Key.F9) { Shortcut("reader"); e.Handled = true; }
             else if (ctrl && e.Key == Key.U) { Shortcut("source"); e.Handled = true; }
             else if ((ctrl && shift && e.Key == Key.I) || e.Key == Key.F12) { Shortcut("devtools"); e.Handled = true; }
             else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { Shortcut("zoomin"); e.Handled = true; }
@@ -549,46 +580,44 @@ namespace Facet
 
         // ------------------------------------------------------------ menu, pages, dialogs
 
+        /// <summary>The main menu: tabs, the profile, this page's tools, Research and the assistant, then Facet's pages.</summary>
         private void ShowMenu()
         {
-            var pop = new Popup { PlacementTarget = menuBtn, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, HorizontalOffset = -200 };
-            var card = Ui.Box(p.Bg, 14, p.Line);
-            card.Width = 244; card.Margin = new Thickness(10);
-            card.Effect = new DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.25, Color = Colors.Black, RenderingBias = RenderingBias.Performance };
-            var sp = new StackPanel { Margin = new Thickness(6) };
-            Action<string, string, Action> item = (icon, text, act) =>
+            var items = new List<Tuple<string, string, Action>>();
+            items.Add(Item("plus", "New tab\tCtrl+T", () => NewTab(null, false)));
+            items.Add(Item("private", "New private tab\tCtrl+Shift+T", () => NewTab(null, true)));
+            items.Add(Item("tabs", "Profile: " + profile.Name, () => PushPage(new ProfilesPage(this))));
+            items.Add(Item("search", "Search everything\tCtrl+K", ShowCommandBar));
+            bool page = current != null && !current.ShowsNewTab;
+            if (page)
             {
-                var row = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 9, 10, 9) };
-                var g = new StackPanel { Orientation = Orientation.Horizontal };
-                g.Children.Add(Icons.Make(icon, p.Ink, 18));
-                var t = Ui.Text(text, 14, p.Ink, Fonts.Sans, FontWeights.Medium);
-                t.Margin = new Thickness(12, 0, 0, 0); t.VerticalAlignment = VerticalAlignment.Center;
-                g.Children.Add(t);
-                row.Child = g;
-                Ui.Button(row, Brushes.Transparent, p.Hover, () => { pop.IsOpen = false; act(); });
-                sp.Children.Add(row);
-            };
-            item("plus", "New tab", () => NewTab(null, false));
-            item("private", "New private tab", () => NewTab(null, true));
-            if (current != null && !current.ShowsNewTab)
-            {
-                item("star", IsBookmarked(current.Url) ? "Remove bookmark" : "Add bookmark", ToggleBookmark);
-                item("link", "Copy link", () => CopyText(current.Url, "Link copied"));
-                item("search", "Find in page", OpenFind);
-                item("print", "Print", Print);
-                item("zoom", "Zoom (" + current.Zoom + "%)", ShowZoom);
+                items.Add(null);
+                items.Add(Item("star", (IsBookmarked(current.Url) ? "Remove bookmark" : "Add bookmark") + "\tCtrl+D", ToggleBookmark));
+                items.Add(Item("copy", "Reader view\tF9", ToggleReader));
+                items.Add(Item("search", "Find in page\tCtrl+F", OpenFind));
+                items.Add(Item("link", "Copy link", () => CopyText(current.Url, "Link copied")));
+                items.Add(Item("print", "Print\tCtrl+P", Print));
+                items.Add(Item("zoom", "Zoom (" + current.Zoom + "%)", ShowZoom));
+                if (!current.IsPrivate)
+                {
+                    items.Add(null);
+                    items.Add(Item("copy", "Save to research", SaveCurrentToResearch));
+                    items.Add(Item("star", "Highlight selection", () => HighlightSelection(current)));
+                    if (AiConfig.Load().Enabled)
+                    {
+                        items.Add(Item("info", "Summarize page", () => AskAi(true)));
+                        items.Add(Item("info", "Ask about this page", () => AskAi(false)));
+                    }
+                }
             }
-            item("download", "Downloads folder", () =>
-            {
-                try { System.Diagnostics.Process.Start("explorer.exe", System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")); } catch { }
-            });
-            item("puzzle", "Extensions", ShowExtensions);
-            item("settings", "Settings", ShowSettings);
-            item("refresh", "Software update", ShowUpdates);
-            card.Child = sp;
-            pop.Child = card;
-            pop.IsOpen = true;
-            Kit.PopIn(card, new Point(1, 0));
+            items.Add(null);
+            items.Add(Item("copy", "Research", ShowResearch));
+            items.Add(Item("refresh", "History\tCtrl+H", ShowHistory));
+            items.Add(Item("download", "Downloads\tCtrl+J", ShowDownloads));
+            items.Add(Item("puzzle", "Extensions", ShowExtensions));
+            items.Add(Item("settings", "Settings", ShowSettings));
+            items.Add(Item("refresh", "Software update", ShowUpdates));
+            ShowPopupMenu(items, menuBtn, PlacementMode.Bottom, -250);
         }
 
         private void PushPage(UIElement page, bool animate = true)
@@ -639,7 +668,7 @@ namespace Facet
             {
                 // the page we return to is already built: refresh its values in place, without animating it again
                 o.Children.Add(pages[pages.Count - 1]);
-                var s = pages[pages.Count - 1] as SettingsPage;
+                var s = pages[pages.Count - 1] as IRefreshable;
                 if (s != null) s.Rebuild();
             }
             else
@@ -664,29 +693,10 @@ namespace Facet
         private void OpenSettings(bool animate)
         {
             if (pages.Count > 0 && pages[pages.Count - 1] is SettingsPage) return;
-            PushPage(new SettingsPage(p, prefs, PopPage,
-                () => { /* options are read on the next request */ },
-                () => Choose("Search engine", Array.ConvertAll(Urls.Engines, e => e.Name), Array.FindIndex(Urls.Engines, e => e.Id == prefs.SearchEngine), i =>
-                {
-                    prefs.SearchEngine = Urls.Engines[i].Id; prefs.Save(); RefreshSettings();
-                }),
-                () => Choose("Theme", new[] { "Match Windows", "Paper (light)", "Paper Dark" }, prefs.Theme, i =>
-                {
-                    prefs.Theme = i; prefs.Save();
-                    pages.Clear();
-                    BuildChrome();
-                    // reopen Settings in the new colours straight away, without the opening fade
-                    OpenSettings(false);
-                }),
-                () => Choose("Clear cookies, cache and site data?", new[] { "Clear everything", "Cancel" }, -1, i => { if (i == 0) ClearData(); }),
-                ShowUpdates, ShowExtensions), animate);
+            PushPage(new SettingsPage(this), animate);
         }
 
-        private void RefreshSettings()
-        {
-            var s = pages.Count > 0 ? pages[pages.Count - 1] as SettingsPage : null;
-            if (s != null) s.Rebuild();
-        }
+        private void RefreshSettings() { RefreshPages(); }
 
         private void ShowUpdates()
         {
@@ -697,7 +707,9 @@ namespace Facet
         {
             try
             {
-                await Cef.GetGlobalCookieManager().DeleteCookiesAsync("", "");
+                // the profile in use: its own storage, or the main one for Personal
+                var ctx = Profiles.Context(profile);
+                await (ctx != null ? ctx.GetCookieManager(null) : Cef.GetGlobalCookieManager()).DeleteCookiesAsync("", "");
                 foreach (var t in tabs)
                 {
                     try { await t.Browser.GetDevToolsClient().Network.ClearBrowserCacheAsync(); } catch { }
@@ -899,10 +911,12 @@ namespace Facet
                 if (t == current) selected = urls.Count;
                 urls.Add(t.Url);
             }
-            prefs.SessionUrls = urls;
-            prefs.SessionSelected = selected;
-            prefs.TrackersBlocked += Stats.Blocked;
-            prefs.SecureLoads += Stats.Secure;
+            data.SessionUrls = urls;
+            data.SessionSelected = selected;
+            // add only what's new since the last save (sessions are now saved often, not just on closing)
+            prefs.TrackersBlocked += Stats.Blocked - savedBlocked; savedBlocked = Stats.Blocked;
+            prefs.SecureLoads += Stats.Secure - savedSecure; savedSecure = Stats.Secure;
+            SaveProfileData();
             prefs.Save();
         }
 

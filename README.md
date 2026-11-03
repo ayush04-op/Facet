@@ -45,9 +45,21 @@ Coming next: built-in extension support (WebExtensions) and an encrypted passwor
 - **Profiles** (formerly workspaces), plus a refreshed logo
 - Session restore after a crash, and a redesigned animated home page
 
+## Windows (v3.0)
+
+Facet for Windows uses Chromium (through CefSharp), bundled inside the app, with the same Paper interface and the
+Android 2.0 features: profiles, Research, Reader view, the command bar, the redesigned home page, site permissions,
+the optional AI assistant and the welcome, plus extensions (userscripts and page-changing Chrome / Firefox
+extensions). Download **`Facet-v3.0-Setup.exe`** from the latest release and run it: it installs for your account
+(no administrator rights) and registers Facet so it can be your default browser. See [CHANGELOG.md](CHANGELOG.md).
+
+`pwsh windows/build.ps1 -Version 3.0` (needs the .NET 8 SDK) builds the browser, its uninstaller, the update zip and
+the installer into `dist/`. CI runs the same script on every push, smoke-tests the browser on real sites, and installs
+and uninstalls it.
+
 ## Building
 
-GitHub Actions builds the APK on every push (`.github/workflows/build.yml`). Download it from
+Android: GitHub Actions builds the APK on every push (`.github/workflows/build.yml`). Download it from
 the run's **Artifacts**. Pushing a tag such as `v1.0` or `v2.0` publishes a GitHub Release.
 
 `gradle.properties` has `geckoVersion=LATEST`, which makes CI look up the newest GeckoView.

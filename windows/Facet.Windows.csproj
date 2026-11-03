@@ -36,6 +36,10 @@
     <Resource Include="..\app\src\main\assets\fonts\*.otf" Link="Fonts\%(Filename)%(Extension)" />
     <!-- The Facet logo, for the window, taskbar and Alt+Tab. -->
     <Resource Include="Facet.ico" />
+    <!-- the logo's four pieces (as on Android), animated into place on the welcome screen -->
+    <Resource Include="Assets\logo_*.png" />
+    <!-- reader view, research highlights and page text, injected into pages when used -->
+    <EmbeddedResource Include="Assets\page.js" LogicalName="page.js" />
   </ItemGroup>
 
 </Project>

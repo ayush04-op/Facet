@@ -21,8 +21,30 @@ namespace Facet
         public bool BlockThirdPartyCookies { get; set; } = true;
         public bool HttpsOnly { get; set; } = true;
         public bool RestoreTabs { get; set; } = true;
-        /// <summary>0 = follow Windows, 1 = light, 2 = dark</summary>
+        /// <summary>0 = follow Windows, 1 = Paper, 2 = Paper Dark, 3 = Paper AMOLED</summary>
         public int Theme { get; set; } = 0;
+        /// <summary>Index into Palette.Accents (0 = Terracotta).</summary>
+        public int Accent { get; set; } = 0;
+        /// <summary>0 = standard, 1 = strict, 2 = custom (the individual switches decide), as on Android.</summary>
+        public int ProtectionLevel { get; set; } = 1;
+        public bool Javascript { get; set; } = true;
+        /// <summary>Id of the profile whose tabs, bookmarks and cookies are in use. "personal" always exists.</summary>
+        public string ProfileId { get; set; } = "personal";
+        /// <summary>Set once the welcome and setup has been seen.</summary>
+        public bool Onboarded { get; set; }
+        /// <summary>True while Facet runs; still true at the next start means it didn't close properly.</summary>
+        public bool Running { get; set; }
+        public int ReaderSize { get; set; } = 19;
+        /// <summary>0 narrow, 1 medium, 2 wide</summary>
+        public int ReaderWidth { get; set; } = 1;
+        /// <summary>0 Paper, 1 Dark, 2 Sepia</summary>
+        public int ReaderTheme { get; set; } = 0;
+
+        /// <summary>The tracker switch in effect: Standard and Strict decide it, Custom uses the switch.</summary>
+        [JsonIgnore] public bool EffectiveBlockTrackers { get { return ProtectionLevel != 2 || BlockTrackers; } }
+        /// <summary>Strict also blocks fingerprinters and cryptominers.</summary>
+        [JsonIgnore] public bool BlockFingerprinters { get { return ProtectionLevel == 1 || (ProtectionLevel == 2 && BlockTrackers); } }
+        [JsonIgnore] public bool EffectiveBlockCookies { get { return ProtectionLevel != 2 || BlockThirdPartyCookies; } }
         public string SearchEngine { get; set; } = "ddg";
         public long TrackersBlocked { get; set; }
         public long SecureLoads { get; set; }

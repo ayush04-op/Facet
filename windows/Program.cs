@@ -24,7 +24,9 @@ namespace Facet
         {
             get
             {
-                var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Facet");
+                // FACET_DATA_DIR gives test runs (and CI) their own folder, so they never touch a real profile
+                var custom = Environment.GetEnvironmentVariable("FACET_DATA_DIR");
+                var d = !string.IsNullOrEmpty(custom) ? custom : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Facet");
                 Directory.CreateDirectory(d);
                 return d;
             }
@@ -45,6 +47,8 @@ namespace Facet
 
                 var s = new CefSettings();
                 s.CachePath = Path.Combine(AppInfo.DataDir, "cef");
+                // profiles keep their own storage in folders under this one
+                s.RootCachePath = s.CachePath;
                 bool smoke = Environment.GetEnvironmentVariable("FACET_SMOKE") == "1";
                 s.LogSeverity = smoke ? LogSeverity.Warning : LogSeverity.Disable;
                 if (smoke) s.LogFile = Path.Combine(AppInfo.DataDir, "cef.log");

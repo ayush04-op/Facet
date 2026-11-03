@@ -218,6 +218,50 @@ namespace Facet
             return Hoverable(g, () => sw.Toggle());
         }
 
+        /// <summary>One option of a set (search engine, theme, protection level): a check marks the chosen one.</summary>
+        public UIElement Choice(string title, string sub, bool selected, Action click)
+        {
+            var g = Base(null);
+            g.Children.Add(Texts(title, sub));
+            if (selected)
+            {
+                var c = Icons.Make("check", p.Accent, 18);
+                Grid.SetColumn(c, 2);
+                g.Children.Add(c);
+            }
+            return Hoverable(g, click);
+        }
+
+        /// <summary>A clickable title / subtitle row, with an optional small action button on the right (remove, cancel).</summary>
+        public UIElement Item(string title, string sub, Action click, string actionIcon = null, Action action = null)
+        {
+            var g = Base(null);
+            g.Children.Add(Texts(title, sub));
+            if (actionIcon != null && action != null)
+            {
+                var btn = Ui.IconButton(p, actionIcon, 14, action, 30);
+                btn.VerticalAlignment = VerticalAlignment.Center;
+                btn.Margin = new Thickness(10, 0, 0, 0);
+                Grid.SetColumn(btn, 2);
+                g.Children.Add(btn);
+            }
+            return Hoverable(g, click);
+        }
+
+        /// <summary>A text field inside a group (notes, names).</summary>
+        public TextBox Field(string text, string hint, bool multiline)
+        {
+            var t = new TextBox
+            {
+                Text = text ?? "", Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = p.Ink, CaretBrush = p.Ink,
+                SelectionBrush = p.Accent, FontFamily = Fonts.Sans, FontSize = 15, Margin = new Thickness(16, 12, 16, 12),
+                AcceptsReturn = multiline, TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                MinHeight = multiline ? 120 : 0, VerticalScrollBarVisibility = multiline ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled
+            };
+            if (!string.IsNullOrEmpty(hint)) t.ToolTip = hint;
+            return t;
+        }
+
         /// <summary>A switch row with one extra action button (the Extensions page's remove button).</summary>
         public UIElement ToggleAction(string icon, string title, string sub, bool value, Action<bool> onChange, string actionIcon, Action action)
         {

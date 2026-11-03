@@ -116,7 +116,7 @@ jobs:
             t="${{ github.event.inputs.release_tag }}"
             echo "name=${t#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=2.0" >> "$GITHUB_OUTPUT"
+            echo "name=3.0" >> "$GITHUB_OUTPUT"
           fi
 
       # The browser, its uninstaller, the update zip and the paper installer (Facet-v<version>-Setup.exe), all in dist/

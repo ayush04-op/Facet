@@ -12,6 +12,8 @@ namespace Facet
         public string Field;
         /// <summary>Called once, on the UI thread: true when accepted, plus the field's text.</summary>
         public Action<bool, string> Answer;
+        /// <summary>For site permissions: the site and the permission (camera, microphone, location, notifications), so an answer can be remembered.</summary>
+        public string PermissionHost, PermissionType;
     }
 
     /// <summary>What was right-clicked.</summary>
@@ -79,11 +81,14 @@ namespace Facet
         public bool OnRequestMediaAccessPermission(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, string requestingOrigin,
             MediaAccessPermissionType requestedPermissions, IMediaAccessCallback callback)
         {
+            string kinds = requestedPermissions.ToString();
             ask(new Ask
             {
                 Title = "Allow " + Describe.What(requestedPermissions) + "?",
                 Message = Describe.Site(requestingOrigin) + " wants to use " + Describe.What(requestedPermissions) + ".",
                 Ok = "Allow", Cancel = "Block",
+                PermissionHost = Urls.Host(requestingOrigin),
+                PermissionType = kinds.Contains("Video") ? SitePerm.Camera : kinds.Contains("Audio") ? SitePerm.Microphone : null,
                 Answer = (ok, _) => { using (callback) { if (ok) callback.Continue(requestedPermissions); else callback.Cancel(); } }
             });
             return true;
@@ -98,6 +103,9 @@ namespace Facet
                 Title = "Allow access?",
                 Message = Describe.Site(requestingOrigin) + " wants to " + (what.StartsWith("your") ? "use " : "") + what + ".",
                 Ok = "Allow", Cancel = "Block",
+                PermissionHost = Urls.Host(requestingOrigin),
+                PermissionType = what == "your location" ? SitePerm.Location : what == "show notifications" ? SitePerm.Notifications
+                    : what == "your camera" ? SitePerm.Camera : what == "your microphone" ? SitePerm.Microphone : null,
                 Answer = (ok, _) => { using (callback) callback.Continue(ok ? PermissionRequestResult.Accept : PermissionRequestResult.Deny); }
             });
             return true;

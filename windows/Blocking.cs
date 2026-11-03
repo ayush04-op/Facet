@@ -38,20 +38,26 @@ namespace Facet
             "eyeota.net","id5-sync.com","pippio.com","serving-sys.com","sizmek.com","flashtalking.com","innovid.com","spotxchange.com",
             "tiqcdn.com","ensighten.com","tags.tiqcdn.com","cdn.mxpnl.com","stats.wp.com","pixel.wp.com","addthis.com","sharethis.com",
             "disqusads.com","revcontent.com","mgid.com","zemanta.com","nativo.com","plista.com","adblade.com","popads.net","propellerads.com",
+        };
+
+        // Fingerprinters and cryptominers: blocked in Strict protection (and Custom with trackers on), as on Android.
+        private static readonly string[] StrictDomains =
+        {
             "coinhive.com","coin-hive.com","crypto-loot.com","jsecoin.com","minero.cc","fingerprintjs.com","fpjs.io","iovation.com",
             "threatmetrix.com","perimeterx.net","datadome.co"
         };
 
         private static readonly HashSet<string> Set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        static TrackerList() { foreach (var d in Domains) Set.Add(d); }
+        private static readonly HashSet<string> StrictSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static TrackerList() { foreach (var d in Domains) Set.Add(d); foreach (var d in StrictDomains) StrictSet.Add(d); }
 
-        public static bool IsTracker(string host)
+        public static bool IsTracker(string host, bool strict = true)
         {
             if (string.IsNullOrEmpty(host)) return false;
             var h = host;
             while (true)
             {
-                if (Set.Contains(h)) return true;
+                if (Set.Contains(h) || (strict && StrictSet.Contains(h))) return true;
                 int dot = h.IndexOf('.');
                 if (dot < 0) return false;
                 h = h.Substring(dot + 1);
@@ -135,15 +141,20 @@ namespace Facet
                 request.Url = "https://" + url.Substring("http://".Length);
                 return CefReturnValue.Continue;
             }
-            if (request.ResourceType == ResourceType.MainFrame && url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                Stats.AddSecure();
+            if (request.ResourceType == ResourceType.MainFrame)
+            {
+                if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) Stats.AddSecure();
+                // a new page: start its "what was blocked" list again
+                if (browser != null) PageBlocks.Reset(browser.Identifier);
+            }
 
-            if (prefs.BlockTrackers && request.ResourceType != ResourceType.MainFrame && TrackerList.IsTracker(host))
+            if (prefs.EffectiveBlockTrackers && request.ResourceType != ResourceType.MainFrame && TrackerList.IsTracker(host, prefs.BlockFingerprinters))
             {
                 string top = TopHost(browser);
                 if (top.Length > 0 && TrackerList.Site(top) != TrackerList.Site(host))
                 {
                     Stats.AddBlocked();
+                    if (browser != null) PageBlocks.Add(browser.Identifier, TrackerList.Site(host));
                     return CefReturnValue.Cancel;
                 }
             }
@@ -153,8 +164,31 @@ namespace Facet
         protected override ICookieAccessFilter GetCookieAccessFilter(
             IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IRequest request)
         {
-            return prefs.BlockThirdPartyCookies ? ThirdPartyCookieFilter.Shared : null;
+            return prefs.EffectiveBlockCookies ? ThirdPartyCookieFilter.Shared : null;
         }
+    }
+
+    /// <summary>What was blocked on the page each tab shows, by site (for "What was blocked on this page").</summary>
+    public static class PageBlocks
+    {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, System.Collections.Concurrent.ConcurrentDictionary<string, int>> pages =
+            new System.Collections.Concurrent.ConcurrentDictionary<int, System.Collections.Concurrent.ConcurrentDictionary<string, int>>();
+
+        public static void Reset(int browserId) { pages[browserId] = new System.Collections.Concurrent.ConcurrentDictionary<string, int>(); }
+
+        public static void Add(int browserId, string site)
+        {
+            var d = pages.GetOrAdd(browserId, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, int>());
+            d.AddOrUpdate(site, 1, (_, n) => n + 1);
+        }
+
+        public static Dictionary<string, int> For(int browserId)
+        {
+            System.Collections.Concurrent.ConcurrentDictionary<string, int> d;
+            return pages.TryGetValue(browserId, out d) ? new Dictionary<string, int>(d) : new Dictionary<string, int>();
+        }
+
+        public static void Forget(int browserId) { System.Collections.Concurrent.ConcurrentDictionary<string, int> d; pages.TryRemove(browserId, out d); }
     }
 
     public class ThirdPartyCookieFilter : ICookieAccessFilter

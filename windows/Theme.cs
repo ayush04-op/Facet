@@ -12,14 +12,35 @@ namespace Facet
     /// <summary>Paper / Paper Dark palette, the same colours as the Android app.</summary>
     public class Palette
     {
-        public bool Dark;
+        public bool Dark, Amoled;
         public SolidColorBrush Bg, Surface, Ink, Muted, Line, Accent, Hover, OnAccent;
 
-        public static Palette For(int mode)
+        /// <summary>The accent colours (the same six as Android): light-theme and dark-theme shade of each.</summary>
+        public static readonly string[][] Accents =
         {
-            bool dark = mode == 2 || (mode == 0 && SystemIsDark());
-            var p = new Palette { Dark = dark };
-            if (dark)
+            new[] { "Terracotta", "#B5532F", "#D4693F" },
+            new[] { "Ocean", "#1F6F8B", "#4FA3C2" },
+            new[] { "Forest", "#3C7A4E", "#6DB584" },
+            new[] { "Violet", "#6B4FBF", "#9C84E8" },
+            new[] { "Rose", "#B23A5E", "#E0708F" },
+            new[] { "Amber", "#B27A12", "#E0A93C" },
+        };
+
+        public static readonly string[] ThemeNames = { "Match Windows", "Paper (light)", "Paper Dark", "Paper AMOLED" };
+
+        /// <summary>mode: 0 follow Windows, 1 Paper, 2 Paper Dark, 3 Paper AMOLED (pure black). accent: index into Accents.</summary>
+        public static Palette For(int mode, int accent = 0)
+        {
+            bool amoled = mode == 3;
+            bool dark = amoled || mode == 2 || (mode == 0 && SystemIsDark());
+            var p = new Palette { Dark = dark, Amoled = amoled };
+            if (amoled)
+            {
+                p.Bg = Ui.B("#000000"); p.Surface = Ui.B("#0D0B09"); p.Ink = Ui.B("#F3EBDA");
+                p.Muted = Ui.B("#978A7A"); p.Line = Ui.B("#221C16"); p.Accent = Ui.B("#D4693F");
+                p.Hover = Ui.B("#F3EBDA", 0x1A); p.OnAccent = Ui.B("#000000");
+            }
+            else if (dark)
             {
                 p.Bg = Ui.B("#15110E"); p.Surface = Ui.B("#211B16"); p.Ink = Ui.B("#F3EBDA");
                 p.Muted = Ui.B("#A09282"); p.Line = Ui.B("#3A3028"); p.Accent = Ui.B("#D4693F");
@@ -31,6 +52,7 @@ namespace Facet
                 p.Muted = Ui.B("#7A6E62"); p.Line = Ui.B("#E2D6BF"); p.Accent = Ui.B("#B5532F");
                 p.Hover = Ui.B("#1E1915", 0x14); p.OnAccent = Ui.B("#FBF6EA");
             }
+            if (accent > 0 && accent < Accents.Length) p.Accent = Ui.B(Accents[accent][dark ? 2 : 1]);
             return p;
         }
 

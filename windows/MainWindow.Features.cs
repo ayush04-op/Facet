@@ -50,16 +50,18 @@ namespace Facet
         /// <summary>One question at a time; later ones wait their turn.</summary>
         private void ShowAsk(Ask a)
         {
+            if (AnswerFromMemory(a)) return;
             if (asking || (modal.Visibility == Visibility.Visible && modal.IsHitTestVisible)) { asks.Enqueue(a); return; }
             asking = true;
             Border card;
             var scrim = Scrim(out card, 440);
-            bool answered = false;
+            bool answered = false, remember = false;
             TextBox field = null;
             Action<bool> finish = ok =>
             {
                 if (answered) return;
                 answered = true;
+                if (remember && a.PermissionHost != null && a.PermissionType != null) SitePerms.Set(a.PermissionHost, a.PermissionType, ok);
                 CloseModal();
                 asking = false;
                 try { a.Answer(ok, field != null ? field.Text : null); } catch { /* the page is gone */ }
@@ -88,6 +90,13 @@ namespace Facet
                     Padding = new Thickness(10, 9, 10, 9), Margin = new Thickness(0, 14, 0, 0), CaretBrush = p.Ink, SelectionBrush = p.Accent
                 };
                 sp.Children.Add(field);
+            }
+            if (a.PermissionType != null && a.PermissionHost != null && a.PermissionHost.Length > 0)
+            {
+                var kit = new Kit(p);
+                var row = kit.Toggle(null, "Remember for " + a.PermissionHost, "Change it any time under Settings, Site permissions.", false, v => remember = v);
+                ((FrameworkElement)row).Margin = new Thickness(-16, 8, -16, 0);
+                sp.Children.Add(row);
             }
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
             if (a.Cancel != null) buttons.Children.Add(Ui.PillButton(p, a.Cancel, false, () => finish(false)));
