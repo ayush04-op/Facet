@@ -70,7 +70,8 @@ jobs:
           KEYSTORE_B64: ${{ secrets.FACET_KEYSTORE_B64 }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/facet.jks"
+            # a secret pasted on Windows can carry a line break (CR LF) or spaces; base64 rejects them
+            printf '%s' "$KEYSTORE_B64" | tr -d '\r\n\t ' | base64 -d > "$RUNNER_TEMP/facet.jks"
             echo "FACET_KEYSTORE=$RUNNER_TEMP/facet.jks" >> "$GITHUB_ENV"
           fi
 
@@ -85,6 +86,10 @@ jobs:
           FACET_KEY_PASSWORD: ${{ secrets.FACET_KEY_PASSWORD }}
         run: |
           set +e
+          # the same for the passwords and alias: drop stray line breaks from pasting
+          export FACET_KEYSTORE_PASSWORD="$(printf '%s' "$FACET_KEYSTORE_PASSWORD" | tr -d '\r\n')"
+          export FACET_KEY_ALIAS="$(printf '%s' "$FACET_KEY_ALIAS" | tr -d '\r\n ')"
+          export FACET_KEY_PASSWORD="$(printf '%s' "$FACET_KEY_PASSWORD" | tr -d '\r\n')"
           task=assembleDebug
           if [ "$RELEASE" = "true" ]; then
             if [ -z "$FACET_KEYSTORE" ]; then
