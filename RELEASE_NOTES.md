@@ -10,7 +10,7 @@ and the welcome), extensions, and a full right-click menu.
 | --- | --- |
 | **`Facet-v3.0-Setup.exe`** | **The Windows installer. Download this one.** |
 | `Facet-v3.0-windows-x64.zip` | The same browser as a folder, for portable use and Facet's own updater |
-| `Facet-v3.0-debug.apk` | Android |
+| `Facet-v3.0.apk` | Android (stable release build) |
 
 Windows 10 or 11, 64-bit. Setup installs for your account only, so it needs no administrator rights. Windows may
 show a SmartScreen notice the first time because the installer isn't code-signed yet: choose **More info → Run anyway**.
@@ -83,7 +83,12 @@ Safe Browsing (the engine Facet embeds doesn't include it).
 
 ## Android
 
-No changes in this release. The Android app is built as 3.0 from the same code as 2.0.5.
+The same features as 2.0.5, now as a **stable release build**: optimized and smaller, and signed with Facet's own
+release key instead of the shared debug key.
+
+**If you installed an earlier Facet APK, uninstall it once before installing 3.0.** Android only lets an app update
+an install signed with the same key, and earlier builds used the debug key. Tabs and bookmarks on that phone don't
+carry over. From 3.0 on, every update installs over the previous one as usual.
 
 ---
 

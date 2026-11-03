@@ -18,7 +18,7 @@ Get these from the [latest release](../../releases/latest):
 | --- | --- |
 | **`Facet-v3.0-Setup.exe`** | **Windows installer.** Installs for your account (no administrator rights) and lets Facet be your default browser. |
 | `Facet-v3.0-windows-x64.zip` | The same Windows browser as a folder, for portable use and Facet's own updater |
-| `Facet-v3.0-debug.apk` | Android |
+| `Facet-v3.0.apk` | Android (stable release build). If you installed an earlier Facet APK, uninstall it once first: 3.0 is signed with a new release key. |
 
 Windows 10 or 11, 64-bit. The installer isn't code-signed yet, so SmartScreen may warn the first time: choose
 **More info → Run anyway**. What's new is in [RELEASE_NOTES.md](RELEASE_NOTES.md) and [CHANGELOG.md](CHANGELOG.md).
@@ -64,9 +64,10 @@ version number to pin the engine.
 
 Local build: JDK 17, Android SDK 35 and Gradle 8.9, then `gradle assembleDebug -PgeckoVersion=<version>`.
 
-Debug builds are signed with the shared key in `app/debug.keystore`, so each build can update the previous one. For
-stable signing add these repository secrets: `FACET_KEYSTORE_B64`, `FACET_KEYSTORE_PASSWORD`, `FACET_KEY_ALIAS`,
-`FACET_KEY_PASSWORD`.
+Test builds are debug builds, signed with the shared key in `app/debug.keystore`, so each can update the previous
+one. Releases (a `v*` tag) are R8-shrunk release builds signed with Facet's private release key, from the repository
+secrets `FACET_KEYSTORE_B64`, `FACET_KEYSTORE_PASSWORD`, `FACET_KEY_ALIAS` and `FACET_KEY_PASSWORD`; a release
+build fails without them.
 
 ### Windows
 

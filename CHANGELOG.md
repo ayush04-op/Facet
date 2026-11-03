@@ -18,6 +18,8 @@ Full notes: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - Facet cube app icon; Facet opens links handed over by other apps in the running window.
 
 ### Changed
+- Android: releases are now stable release builds (R8-shrunk, signed with Facet's private release key) named
+  `Facet-v<version>.apk`; earlier debug-signed installs must be uninstalled once.
 - Tabs replace the Windows title bar; full-size window buttons; Windows 11 rounded corners.
 - Animations throughout, paper scrollbars and smooth scrolling, ClearType text.
 - Lower memory and CPU use: restored tabs load when opened, hidden tabs stop drawing, unused Chromium services off.

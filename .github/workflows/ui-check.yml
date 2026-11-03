@@ -36,8 +36,9 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "::notice title=GeckoView::x86_64 $v"
 
-      - name: Build debug APK (x86_64)
-        run: gradle --no-daemon --console=plain assembleDebug -PversionName=check -PgeckoVersion=${{ steps.gv.outputs.version }} -PgeckoArtifact=geckoview-x86_64
+      # the release build too (shrunk by R8, as published), so the check catches anything R8 breaks
+      - name: Build debug and release APKs (x86_64)
+        run: gradle --no-daemon --console=plain assembleDebug assembleRelease -PversionName=check -PgeckoVersion=${{ steps.gv.outputs.version }} -PgeckoArtifact=geckoview-x86_64
 
       - name: Enable KVM
         run: |
