@@ -71,7 +71,10 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
             # a secret pasted on Windows can carry a line break (CR LF) or spaces; base64 rejects them
-            printf '%s' "$KEYSTORE_B64" | tr -d '\r\n\t ' | base64 -d > "$RUNNER_TEMP/facet.jks"
+            clean=$(printf '%s' "$KEYSTORE_B64" | tr -d '\r\n\t ')
+            # safe to show: the length, whether it starts like a keystore (all do: MII...) and stray characters
+            echo "keystore secret: ${#clean} characters, starts like a keystore: $([[ "$clean" == MII* ]] && echo yes || echo no), characters outside base64: $(printf '%s' "$clean" | tr -d 'A-Za-z0-9+/=' | wc -c)"
+            printf '%s' "$clean" | base64 -d > "$RUNNER_TEMP/facet.jks"
             echo "FACET_KEYSTORE=$RUNNER_TEMP/facet.jks" >> "$GITHUB_ENV"
           fi
 
