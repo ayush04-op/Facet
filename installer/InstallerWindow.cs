@@ -19,7 +19,7 @@ namespace Facet.Setup
 {
     public enum Mode { Install, Update, Uninstall }
 
-    /// <summary>The paper-themed setup window: a cube that assembles itself on the left, the steps on the right.</summary>
+    /// <summary>The paper-themed setup window: the Facet logo assembling itself on the left, the steps on the right.</summary>
     public class InstallerWindow : Window
     {
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -30,9 +30,8 @@ namespace Facet.Setup
         private bool busy;
 
         private readonly Grid stage = new Grid();
-        private readonly Canvas cube = new Canvas { Width = 150, Height = 150 };
-        private readonly Path[] faces = new Path[3];
-        private readonly TranslateTransform floatT = new TranslateTransform();
+        // the same animated logo as the browser's welcome screen; it assembles and floats by itself once loaded
+        private readonly LogoView logo = new LogoView(160, true, Paper.Accent.Color);
         private Ellipse shadow;
         private Border closeBtn;
 
@@ -64,7 +63,7 @@ namespace Facet.Setup
             Content = Build();
             Loaded += (s, e) =>
             {
-                AssembleCube();
+                ShowShadow();
                 if (mode == Mode.Update) StartWork();
                 else ShowStep(mode == Mode.Uninstall ? UninstallWelcome() : Welcome());
             };
@@ -86,34 +85,19 @@ namespace Facet.Setup
             });
             left.Children.Add(new Border { Width = 1, Background = Paper.Line, HorizontalAlignment = HorizontalAlignment.Right });
             var brand = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-            var cubeHost = new Grid { Width = 170, Height = 190 };
+            var logoHost = new Grid { Width = 170, Height = 190 };
             shadow = new Ellipse
             {
                 Width = 96, Height = 14, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 8),
                 Fill = new RadialGradientBrush(Color.FromArgb(0x55, 0x8F, 0x3E, 0x20), Color.FromArgb(0, 0x8F, 0x3E, 0x20)),
                 RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new ScaleTransform(1, 1), Opacity = 0
             };
-            cubeHost.Children.Add(shadow);
-            cube.RenderTransform = floatT;
-            cube.VerticalAlignment = VerticalAlignment.Top;
-            cube.Margin = new Thickness(0, 10, 0, 0);
-            for (int i = 0; i < 3; i++)
-            {
-                faces[i] = new Path
-                {
-                    Data = Geometry.Parse(Paper.CubeFaces[i]), Fill = Paper.CubeColors[i], Opacity = 0,
-                    RenderTransform = new TranslateTransform(), Stretch = Stretch.None
-                };
-                // the cube spans 48 x 56 of its 108-unit canvas: scale it up and centre it in the 150 px stage
-                var fit = new TransformGroup();
-                fit.Children.Add(new ScaleTransform(2.0, 2.0));
-                fit.Children.Add(new TranslateTransform(75 - 54 * 2.0, 75 - 54 * 2.0));
-                var holder = new Canvas { RenderTransform = fit };
-                holder.Children.Add(faces[i]);
-                cube.Children.Add(holder);
-            }
-            cubeHost.Children.Add(cube);
-            brand.Children.Add(cubeHost);
+            logoHost.Children.Add(shadow);
+            logo.VerticalAlignment = VerticalAlignment.Top;
+            logo.RenderTransformOrigin = new Point(0.5, 0.5);
+            logo.RenderTransform = new ScaleTransform(1, 1);
+            logoHost.Children.Add(logo);
+            brand.Children.Add(logoHost);
             var name = Paper.Text("Facet", 44, Paper.Ink, Paper.Serif);
             name.HorizontalAlignment = HorizontalAlignment.Center; name.Margin = new Thickness(0, 6, 0, 0);
             brand.Children.Add(name);
@@ -147,54 +131,33 @@ namespace Facet.Setup
             return root;
         }
 
-        // ------------------------------------------------------------------ the cube
+        // ------------------------------------------------------------------ the logo
 
-        /// <summary>The three faces slide together into the Facet cube, then it floats.</summary>
-        private void AssembleCube()
+        /// <summary>The shadow fades in under the logo as it assembles, then breathes with its float (2.1 s each way).</summary>
+        private void ShowShadow()
         {
-            var from = new[] { new Vector(0, -34), new Vector(-30, 18), new Vector(30, 18) };
-            for (int i = 0; i < 3; i++)
-            {
-                var t = (TranslateTransform)faces[i].RenderTransform;
-                t.X = from[i].X; t.Y = from[i].Y;
-                int delay = 120 + i * 130;
-                faces[i].BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(380)) { BeginTime = TimeSpan.FromMilliseconds(delay) });
-                t.BeginAnimation(TranslateTransform.XProperty, Paper.To(0, 900, Paper.Out, delay));
-                t.BeginAnimation(TranslateTransform.YProperty, Paper.To(0, 900, Paper.Out, delay));
-            }
-            shadow.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(700)) { BeginTime = TimeSpan.FromMilliseconds(500) });
-            // gentle float, shadow breathing with it
-            var bob = new DoubleAnimation(0, -7, TimeSpan.FromMilliseconds(2400)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Paper.InOut, BeginTime = TimeSpan.FromMilliseconds(1100) };
-            floatT.BeginAnimation(TranslateTransform.YProperty, bob);
-            var squash = new DoubleAnimation(1, 0.86, TimeSpan.FromMilliseconds(2400)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Paper.InOut, BeginTime = TimeSpan.FromMilliseconds(1100) };
+            shadow.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(700)) { BeginTime = TimeSpan.FromMilliseconds(600) });
+            var squash = new DoubleAnimation(0.86, 1, TimeSpan.FromMilliseconds(2100)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Paper.InOut };
             ((ScaleTransform)shadow.RenderTransform).BeginAnimation(ScaleTransform.ScaleXProperty, squash);
         }
 
-        /// <summary>While working, light runs across the faces one after another.</summary>
-        private void PulseCube(bool on)
+        /// <summary>While working, the logo breathes softly.</summary>
+        private void PulseLogo(bool on)
         {
-            for (int i = 0; i < 3; i++)
+            if (!on) { logo.BeginAnimation(OpacityProperty, Paper.To(1, 300)); return; }
+            logo.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.6, TimeSpan.FromMilliseconds(700))
             {
-                if (!on) { faces[i].BeginAnimation(OpacityProperty, Paper.To(1, 300)); continue; }
-                faces[i].BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.55, TimeSpan.FromMilliseconds(600))
-                {
-                    AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Paper.InOut, BeginTime = TimeSpan.FromMilliseconds(i * 260)
-                });
-            }
+                AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Paper.InOut
+            });
         }
 
-        /// <summary>After uninstalling, the faces drift apart and fade.</summary>
-        private void ScatterCube()
+        /// <summary>After uninstalling, the logo shrinks a little and fades.</summary>
+        private void FadeLogo()
         {
-            floatT.BeginAnimation(TranslateTransform.YProperty, null);
-            var to = new[] { new Vector(0, -40), new Vector(-38, 26), new Vector(38, 26) };
-            for (int i = 0; i < 3; i++)
-            {
-                var t = (TranslateTransform)faces[i].RenderTransform;
-                t.BeginAnimation(TranslateTransform.XProperty, Paper.To(to[i].X, 900, Paper.Out, i * 90));
-                t.BeginAnimation(TranslateTransform.YProperty, Paper.To(to[i].Y, 900, Paper.Out, i * 90));
-                faces[i].BeginAnimation(OpacityProperty, Paper.To(0.12, 900, Paper.Out, i * 90));
-            }
+            var sc = (ScaleTransform)logo.RenderTransform;
+            sc.BeginAnimation(ScaleTransform.ScaleXProperty, Paper.To(0.8, 900, Paper.Out));
+            sc.BeginAnimation(ScaleTransform.ScaleYProperty, Paper.To(0.8, 900, Paper.Out));
+            logo.BeginAnimation(OpacityProperty, Paper.To(0.15, 900, Paper.Out));
             shadow.BeginAnimation(OpacityProperty, Paper.To(0, 600));
         }
 
@@ -425,7 +388,7 @@ namespace Facet.Setup
             }
             ShowStep(ProgressStep(uninstall ? "Uninstall" : mode == Mode.Update ? "Update" : "Installing",
                 uninstall ? "Removing Facet" : mode == Mode.Update ? "Updating Facet" : "Setting up Facet"));
-            PulseCube(true);
+            PulseLogo(true);
             string target = dir;
             bool desk = desktopShortcut, data = deleteData;
             double lastSent = -1; string lastStatus = null;
@@ -449,7 +412,7 @@ namespace Facet.Setup
             {
                 busy = false;
                 closeBtn.Visibility = Visibility.Visible;
-                PulseCube(false);
+                PulseLogo(false);
                 if (t.IsFaulted) { ShowStep(Failed(t.Exception.GetBaseException().Message)); return; }
                 SetProgress(1, "Done");
                 var finish = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
@@ -460,7 +423,7 @@ namespace Facet.Setup
 
         private void Finished()
         {
-            if (mode == Mode.Uninstall) { ScatterCube(); ShowStep(Done("Facet has been removed", "Thanks for trying Facet.", Paper.Pill("Close", true, Close))); return; }
+            if (mode == Mode.Uninstall) { FadeLogo(); ShowStep(Done("Facet has been removed", "Thanks for trying Facet.", Paper.Pill("Close", true, Close))); return; }
             string exe = System.IO.Path.Combine(dir, "Facet.exe");
             if (mode == Mode.Update)
             {

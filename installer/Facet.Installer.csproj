@@ -33,9 +33,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the Prism fonts and the paper cube, shared with the app -->
+    <!-- the Prism fonts and the Facet logo, shared with the app -->
     <Resource Include="..\app\src\main\assets\fonts\*.otf" Link="Fonts\%(Filename)%(Extension)" />
     <Resource Include="..\windows\Facet.ico" Link="Facet.ico" />
+    <Resource Include="..\windows\Assets\logo_*.png" Link="Assets\%(Filename)%(Extension)" />
+    <Compile Include="..\windows\Logo.cs" Link="Logo.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Payload)' != ''">

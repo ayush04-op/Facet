@@ -134,16 +134,6 @@ namespace Facet.Setup
             return g;
         }
 
-        /// <summary>The three faces of the Facet cube, on a 108-unit canvas, as in the app icon.</summary>
-        public static readonly string[] CubeFaces =
-        {
-            "M54,26 L78.2,40 L54,54 L29.8,40 Z",
-            "M29.8,40 L54,54 L54,82 L29.8,68 Z",
-            "M78.2,40 L54,54 L54,82 L78.2,68 Z",
-        };
-
-        public static readonly Brush[] CubeColors = { AccentSoft, Accent, AccentDeep };
-
         /// <summary>A faint ruled-paper grid, as on Facet's new tab page.</summary>
         public static Brush RuledGrid()
         {
